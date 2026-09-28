@@ -99,22 +99,23 @@ What the `binary` path does differently, and nothing else does:
 - `k8s_accel_runtime=ascend` registers `ascend-docker-runtime` as a runc.v2
   runtime and makes it `default_runtime_name`.
 
-Everything else -- swap, modules, sysctl, `/etc/hosts`, `SystemdCgroup`, the
-image-pull timeout, `certs.d` -- is the shared path, the same as on an Ubuntu
-node.
-
-⚠️ **containerd's config is regenerated from `containerd config default` on
-every run**, so anything the vendor's installer put in `/etc/containerd/config.toml`
-is gone afterwards. That is deliberate -- Ascend's installer pointed runc at the
-v1 shim containerd 2.x removed, which would have survived a patch-in-place --
-but if you have your own settings there, put them in the playbook, not the file.
+⚠️ **Node prep overwrites `/etc/containerd/config.toml`.** It writes the file
+from `containerd config default` every run, so containerd settings made on the
+host -- by you or by the vendor's installer -- do not survive. Put settings you
+need in the playbook.
 
 ## 2. Join
 
-Not the bare `kubeadm join` line from `kubeadm-cluster-init.md` — an older host
-needs kubelet overrides, and they have to be in place *during* the join. Get a
-token on the control plane (`kubeadm token create --ttl 1h --print-join-command`),
-then on the node:
+A config file rather than the bare `kubeadm join` line from
+[`kubeadm-cluster-init.md`](kubeadm-cluster-init.md). Nothing about the
+accelerator needs this; an **old userspace** does. `kubeadm join` downloads the
+cluster's KubeletConfiguration and starts kubelet during the join, so on a host
+with cgroup v1 or without systemd-resolved the overrides have to be in place by
+then -- afterwards kubelet is already crash-looping. A node on a current distro
+uses the bare line.
+
+Get a token on the control plane
+(`kubeadm token create --ttl 1h --print-join-command`), then on the node:
 
 `/etc/kubernetes/join-patches/kubeletconfiguration+strategic.yaml` -- the
 filename is kubeadm's convention, `<component><+strategic|+merge|+json>.yaml`:
@@ -137,7 +138,7 @@ discovery:
     token: "<token>"
     caCertHashes: ["sha256:<hash>"]
 nodeRegistration:
-  name: "<node>"                    # see the naming note below
+  name: "<node>"                    # without this, the vendor hostname
   criSocket: unix:///run/containerd/containerd.sock
   taints:
     - {key: "huawei.com/Ascend910", value: "compute-only", effect: "NoSchedule"}
@@ -158,8 +159,8 @@ kubeadm join --config /etc/kubernetes/join.yaml && rm -f /etc/kubernetes/join.ya
 
 Why each piece:
 
-- **node name** follows `<accelerator>-<last IP octet>` -- `ascend910b-207`, say --
-  instead of the vendor hostname, which on these hosts is whatever the vendor set.
+- **node name set explicitly.** Left out, kubeadm registers the node under the
+  host's hostname, which on a vendor image is whatever the vendor chose.
 - **taint at registration**, so no general pod lands in the window before the
   labels go on. Same idea as `script/taint_gpu_nodes.sh` for NVIDIA nodes.
 - **kubelet overrides via `patches:`, not by editing afterwards.** kubeadm
@@ -213,16 +214,6 @@ make ENV=<cluster> helm-apply SELECTOR=name=ascend-device-plugin
 The plugin is a helmfile release like every other component, and the chart is
 **Huawei's own** (`ascend/mindcluster-deploy-tool-26.1.0.tgz`, MindCluster 26.1.0):
 
-- It is vendored into the repo because it ships as a tgz attached to a GitCode
-  release, not from a helm repo — `Ascend-helm-deploy-tool_<ver>_linux.zip`.
-  It is kept **as that .tgz**, byte for byte, so "we run the vendor chart
-  unmodified" is something a reviewer can check rather than take on trust:
-
-      shasum -a 256 ascend/mindcluster-deploy-tool-26.1.0.tgz
-      # 966e9abc74c8dce157fc70c48f99ab563eaa3245a4d5600d0d9f9215b07b2440
-
-  Unpacked it is 131 files nobody reviews in a diff, and a local edit would be
-  invisible. To inspect it: `tar xzf ascend/mindcluster-deploy-tool-26.1.0.tgz`.
 - It creates the `mindx-dl` and `cluster-system` namespaces unconditionally, with
   `helm.sh/resource-policy: keep` so they survive an uninstall. With only the
   device plugin enabled they just sit there empty. Upstream behaviour; left alone
@@ -232,11 +223,10 @@ The plugin is a helmfile release like every other component, and the chart is
   plugin). `ascend/overrides.yaml` enables **only the device plugin**. Note that
   `ascend-for-volcano` would replace the cluster's existing Volcano release, so
   it is not something to switch on casually.
-- `volcanoType: false`, so whole cards are allocated by the default
-  kube-scheduler; the chart defaults to `true`, i.e. expecting Volcano.
-- The image is pulled from **Docker Hub** (`ascendai/ascend-k8sdeviceplugin`,
-  multi-arch). AscendHub's public SWR only serves old tags — v7.1.RC1 and
-  v6.0.0 pull anonymously, the v26.1.0 this chart wants does not.
+- **Image from Docker Hub**, not the chart's default. The chart points at
+  Huawei's own registry, where this version needs an account; Docker Hub carries
+  the same release (`ascendai/ascend-k8sdeviceplugin`, arm64 + amd64) and pulls
+  anonymously.
 - The chart's DaemonSet selects on `workerselector=dls-worker-node`, Huawei's
   own label convention — hence that label above, next to our own `accelerator`.
 - `enabled.ascendDevicePlugin` is **off by default**; turn it on in the
@@ -263,8 +253,6 @@ Three things worth checking explicitly -- each has looked fine while being wrong
   it reach the `kubernetes` Service ClusterIP (kube-proxy replacement) and a pod
   on another node (tunnel). Pick the peer from the pod CIDR — a hostNetwork pod
   carries the node IP and testing against it proves nothing.
-- Reading allocatable with jsonpath needs the dots in `huawei.com/Ascend910`
-  escaped; unescaped it returns empty, which reads exactly like "no cards".
 
 Then the card itself:
 
