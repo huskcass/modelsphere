@@ -29,43 +29,43 @@ curl -s http://llm.example.com/qwen/v1/chat/completions \
 An unknown route returns `502` while everything is healthy.
 
 The route is created from the engine chart's `modelRoute:` section and follows
-the model's pods as they come and go. openresty reloads gracefully: streams in
-flight are not cut.
+the model's pods as they come and go. 
 
 ## Route limits
 
-Set these in the model's values file, under `modelRoute.nginx.values`. All
-values are strings:
+Set these in the model's values file, under `modelRoute.nginx`:
 
 ```yaml
 modelRoute:
   nginx:
     outputConfigMap: "llm-route/openresty-conf"   # required
-    values:
+    peers:                        # a list: write it whole, keep both entries
+      - use: backend
+        priority: 2
+        maxConcurrency: 60        # per engine pod; the route's limit is about this x healthy pods
+      - use: backend-svc
+        priority: 1
+    values:                       # all values are strings
       ttft_limit_ms: "20000"
       tps_limit_tps: "25"
-      default_max: "60"
+      adaptive_cc_min_frac: "0.5"
 ```
 
 | Setting | Default | What it does |
 | --- | --- | --- |
+| `peers[].maxConcurrency` (the `use: backend` entry) | `100` | Concurrency cap per engine pod. The route's static limit is about this × healthy pods |
 | `ttft_limit_ms` | `30000` | When the route's average time to first token reaches this, new requests get `429`. A few requests still pass so the average can recover |
 | `tps_limit_tps` | `20` | Decode-rate target, in tokens/s per request. Below it, adaptive concurrency lowers the concurrency limit |
 | `adaptive_cc` | on | `"false"` turns adaptive concurrency off: the full static limit applies, and a decode rate below `tps_limit_tps` gives `429` instead |
-| `adaptive_cc_min` | 40 % of the static limit | The lowest the adaptive limit goes |
+| `adaptive_cc_min_frac` | `0.4` | Floor of the adaptive limit, as a fraction of the static limit (above 0, at most 1) |
+| `adaptive_cc_min` | not set | Floor as an absolute number; when set, `adaptive_cc_min_frac` is ignored |
 | `default_max` | `20` | Concurrency cap for a peer with no `maxConcurrency` of its own |
-| `expose_routed_peer` | `"true"` | Responses carry `X-Routed-Peer: <ip:port>\|<gpu>\|<node>`. Set `"false"` on routes reachable from outside the cluster |
-
-The per-pod cap is not a `values` key: it is `maxConcurrency` (default `100`)
-on the `use: backend` entry of `modelRoute.nginx.peers`. The route's static
-limit is roughly that cap × healthy pods. The setting is a list, so copy the
-chart's default list and edit it.
 
 ### SLO targets take precedence
 
 If the model's `sloRequirement.extraSpec` declares `ttft` or `otps` targets,
 they become the route's TTFT and decode-rate limits, and `ttft_limit_ms` /
-`tps_limit_tps` and runtime overrides are ignored for that metric. The same
+`tps_limit_tps` are ignored for that metric. The same
 targets drive autoscaling; the fields are described in
 [autoscaling.md](autoscaling.md#model-settings). `modelRoute.slo.enabled:
 false` keeps the static values instead.
@@ -73,45 +73,51 @@ false` keeps the static values instead.
 A model installed with the chart defaults declares no targets, so the values
 above apply.
 
-## How the limits behave
+## How rate limiting works
 
-- **Adaptive concurrency starts low and grows only under pressure.** When it
-  first applies, a route drops to about 40 % of its static limit. It grows 2 %
-  every 20 s only while requests fill the limit or get `429`s, so a lightly
-  loaded route sits at the floor; reaching the full limit takes about 15
-  minutes of sustained load. It shrinks when the decode rate falls below
-  `tps_limit_tps` or TTFT rises above its limit.
-- **A `tps_limit_tps` the engine cannot reach keeps the limit at the floor**,
-  and nothing alerts on it. Watch `/_tps_status`.
-- **Decode-rate samples need `usage` in the response.** A streaming client
-  that does not send `stream_options.include_usage` produces no sample; the
-  counter `nousage_samples` grows instead and adaptive concurrency never gets a
-  value. Make clients request usage, or set `adaptive_cc: "false"` on that
-  route.
-- **`GET /v1/models` is never rate-limited**, so health probes from outside
-  always pass.
+A route has three limits. A request that trips any of them gets `429` at once;
+nothing is queued.
 
-## Change a limit at runtime
+1. **Concurrency.** The number of requests in flight on the route is capped.
+   The static cap is `maxConcurrency` × healthy pods. With adaptive concurrency
+   (on by default) the cap in force moves between a floor
+   (`adaptive_cc_min_frac` of the static cap) and the static cap: it drops when
+   requests decode slower than `tps_limit_tps` or wait longer than
+   `ttft_limit_ms` for their first token, and rises again only while requests
+   are filling the cap. A new or idle route starts at the floor.
+2. **Time to first token.** When the route's recent average TTFT reaches
+   `ttft_limit_ms`, new requests are rejected. A few still get through, so the
+   limit lifts by itself once the engines catch up.
+3. **Decode rate.** `tps_limit_tps` is the output speed each request should
+   get. With adaptive concurrency on, a slower rate only lowers the concurrency
+   cap (1). With `adaptive_cc: "false"`, a slower rate rejects requests
+   directly.
 
-For an immediate change without a reload, call the route's endpoints from
-inside the active openresty pod. They accept only `127.0.0.1`:
+The decode rate is read from the `usage` in each response, so streaming
+clients should send `stream_options.include_usage`.
 
-```bash
-POD=$(kubectl -n llm-route get pod -l openresty-active=true -o name | head -1)
-kubectl -n llm-route exec $POD -c openresty -- \
-  curl -s 'http://127.0.0.1:8080/qwen/_tps_limit?tps=15&ttl=3600'
+## Change a limit
+
+Edit the model's values file and upgrade the release:
+
+```yaml
+# values.yaml of the model
+modelRoute:
+  nginx:
+    values:
+      tps_limit_tps: "15"
 ```
 
-| Endpoint | What it does |
-| --- | --- |
-| `/<route>/_ttft_limit?ms=N` | Set the TTFT limit; `ms=0` clears the override |
-| `/<route>/_tps_limit?tps=N` | Set the decode-rate limit; `tps=0` clears the override |
-| `/<route>/_ttft_toggle?on=0` | Turn TTFT limiting off (`on=1` turns it back on) |
-| `/<route>/_tps_toggle?on=0` | Turn decode-rate handling and adaptive concurrency off; the full static limit applies |
+```bash
+helm upgrade <release> modelsphere/<engine> -n <ns> -f values.yaml
+```
 
-Overrides expire after `ttl` seconds (default `7200`, `0` = never). They are
-lost when the pod restarts or the standby takes over, and have no effect while
-an SLO target is declared. For a lasting change, edit the values file.
+Always pass the whole values file with `-f`, not `--reuse-values`.
+
+A change under `modelRoute` or `sloRequirement` does not restart the engine:
+the route is rewritten and openresty reloads it gracefully, without cutting
+requests in flight. It takes effect within about a minute. To confirm, check
+`/<route>/_tps_status` or `_ttft_status` (see [Check that it works](#check-that-it-works)).
 
 ## Turn on API keys
 
@@ -141,18 +147,22 @@ changes; no restart is needed.
 
 ## Body logging: the listener address
 
-openresty sends request and response bodies to the bodylog listener, and
-[autoscaling](autoscaling.md) depends on them. **The host must be the fully
-qualified name `bodylog.<namespace>.svc.cluster.local`.** A shorter name never
-resolves inside nginx, and the records are dropped with no error.
+Body logging is optional. openresty sends each request and response to the
+bodylog listener, and [autoscaling](autoscaling.md) reads its signals from
+those records.
 
-**Known issue:** `llmgateway/openresty.yaml.gotmpl` sets
-`host: bodylog.llm-route.svc`. Change it to:
+- **On** (the default, `enabled.bodylog: true`): openresty is pointed at
+  `bodylog.<namespace>.svc.cluster.local`. If you set the address yourself
+  (`bodylog.host` in `llmgateway/openresty.yaml.gotmpl`), use the fully
+  qualified name; a shorter one never resolves inside nginx and records are
+  dropped without an error.
+- **Off**: set `enabled.bodylog: false` and `enabled.bodylogExporter: false`.
+  openresty's address is then left empty, and it captures and sends nothing.
+  Autoscaling has no signals and holds every model where it is.
 
-```yaml
-bodylog:
-  host: bodylog.llm-route.svc.cluster.local
-```
+If the address is set but no listener answers, requests are not affected: each
+openresty worker keeps records in memory (up to 256 MB) and then drops them,
+counting `drop_count`, and logs a warning every 1,000 drops.
 
 **To check that records arrive**, query the listener's `/summary` on its HTTP
 port `9998` (with its token, if one is set): `peers` must be non-empty. The
@@ -174,13 +184,16 @@ curl -s http://llm.example.com/qwen/_429_status      # 429 counts by reason
 
 **The status endpoints have no authentication and list the engines' internal
 addresses.** Do not expose them: if port 8080 is reachable from outside, block
-`/<route>/_*` at the Gateway. `/_bodylog_status` accepts only `127.0.0.1`;
-query it from inside the active pod as in
-[Change a limit at runtime](#change-a-limit-at-runtime).
+`/<route>/_*` at the Gateway. `/_bodylog_status` accepts only `127.0.0.1`, so
+query it from inside the active pod:
+
+```bash
+POD=$(kubectl -n llm-route get pod -l openresty-active=true -o name | head -1)
+kubectl -n llm-route exec $POD -c openresty -- curl -s 127.0.0.1:8080/qwen/_bodylog_status
+```
 
 In `/_tps_status`, `tps_limit_source` says where the decode-rate limit comes
-from: `declared` (SLO), `override` (runtime), `route` (values file) or
-`global_default` (20 tok/s).
+from: `declared` (SLO), `route` (values file) or `global_default` (20 tok/s).
 
 | Symptom | Do |
 | --- | --- |

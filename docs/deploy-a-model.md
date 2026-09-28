@@ -40,18 +40,6 @@ modelCheck:
 extraArgs:
   - --tp-size=8
   - --mem-fraction-static=0.85
-startupProbe:
-  periodSeconds: 30
-  timeoutSeconds: 10
-  failureThreshold: 180               # x 30 s = 90 minutes to load
-progressDeadlineSeconds: 7200
-terminationGracePeriodSeconds: 3600   # shutdown settings: see below
-lifecycle:
-  forceShutdown: true
-  preStop:
-    drainSeconds: 600
-    pollIntervalSeconds: 5
-  preStopKill: true
 volumes:
   - name: shm
     emptyDir: { medium: Memory, sizeLimit: 32Gi }
@@ -69,10 +57,11 @@ modelRoute:
     enabled: false
 ```
 
-**Keep the shutdown settings** above: a pod being replaced keeps serving
-until its requests are done, for up to 10 minutes. With the chart defaults an
-engine rollout drops in-flight requests. See
-[rolling-updates.md](rolling-updates.md#engine).
+**Startup and shutdown use the chart defaults**: up to 90 minutes to load
+the model, and a pod being replaced keeps serving until its requests are done,
+for up to 10 minutes. Raise `startupProbe.failureThreshold` for a model that
+loads slower, and `lifecycle.preStop.drainSeconds` for responses that run
+longer.
 
 **Autoscaling is off until you set `maximumDeployment`**: the model stays at
 one replica. See
@@ -89,15 +78,9 @@ one replica. See
 | `model.gpus` | `"1"` | GPUs per pod. The only place to set a GPU count; not under `resources` |
 | `extraArgs` | `[]` | Engine flags: tensor parallelism (`--tensor-parallel-size=N` on both engines; SGLang also accepts `--tp-size=N`), memory fraction, parsers, `--trust-remote-code` |
 | `modelCheck.requiredGlobs` | `["config.json"]` | Files that must exist in the weights directory before the engine starts. Add `"*.safetensors"` |
-| `startupProbe.periodSeconds`, `timeoutSeconds`, `failureThreshold` | `10`, `5`, `30` | Set `30`, `10`, `180`: up to 90 minutes to load the model |
-| `progressDeadlineSeconds` | `1800` | Set `7200`. Must be longer than the startup probe allows |
 | `resources`, `volumes`, `volumeMounts` | empty | CPU, memory, a memory-backed `/dev/shm` |
 | `nodeSelector`, `tolerations`, `affinity` | empty | Which GPU nodes the model runs on |
 | `priorityClassName` | `""` | e.g. `inference-prod` |
-| `terminationGracePeriodSeconds` | `60` | Set `3600` |
-| `lifecycle.preStop.drainSeconds` | `30` | Set `600`: how long a pod being removed waits for its requests to finish |
-| `lifecycle.preStop.pollIntervalSeconds` | `2` | Set `5` |
-| `lifecycle.forceShutdown`, `lifecycle.preStopKill` | `false`, `true` | Set both `true` (sglang only) |
 | `modelRoute.nginx.outputConfigMap` | not set | **Required**: `llm-route/openresty-conf` |
 | `modelRoute.nginx.route` | release name | The path prefix, `/<route>/v1/...` |
 | `modelRoute.nginx.values.expose_routed_peer` | `"true"` | Names the serving pod in `X-Routed-Peer`. Set `"false"` on any route reachable from outside the cluster |
@@ -124,16 +107,6 @@ modelCheck:
 extraArgs:
   - --tensor-parallel-size=8
   - --gpu-memory-utilization=0.85
-startupProbe:
-  periodSeconds: 30
-  timeoutSeconds: 10
-  failureThreshold: 180               # x 30 s = 90 minutes to load
-progressDeadlineSeconds: 7200
-terminationGracePeriodSeconds: 3600
-lifecycle:
-  preStop:
-    drainSeconds: 600
-    pollIntervalSeconds: 5
 volumes:
   - name: shm
     emptyDir: { medium: Memory, sizeLimit: 32Gi }
@@ -179,10 +152,6 @@ helm repo add modelsphere https://modelsphere.github.io/helm-charts
 helm upgrade --install qwen modelsphere/sglang \
   -n llm-demo --create-namespace -f qwen-values.yaml
 ```
-
-On a cluster installed from this repo you can instead list models in a file
-(format: `models/examples/sglang-qwen.yaml`) and run
-`make helm-apply SELECTOR=tier=model MODELS=models/site.yaml`.
 
 ## Check that it works
 

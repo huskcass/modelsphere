@@ -6,7 +6,10 @@ bodylog:
   # bodylog simply receives nothing. Measured on a test cluster: with
   # `bodylog.llm-route.svc` not one request was recorded; with the name below,
   # the first request landed in /data/bodylog/<date>/<hour>.jsonl.
-  host: bodylog.{{ .Values.namespaces.llmRoute }}.svc.cluster.local
+  #
+  # Empty when bodylog is not installed: openresty then captures and sends
+  # nothing, which is what enabled.bodylog: false should mean.
+  host: {{ if .Values.enabled.bodylog }}"bodylog.{{ .Values.namespaces.llmRoute }}.svc.cluster.local"{{ else }}""{{ end }}
 fullnameOverride: openresty
 image:
   repository: {{ .Values.registry }}/llm-openresty

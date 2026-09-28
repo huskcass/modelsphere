@@ -85,13 +85,31 @@ rejected too, so CART stops following the engine pods until it restarts.
 `<release>-cart-config` ConfigMap are lost at the next upgrade. Make changes
 in values.
 
+## How the worker list follows the engine pods
+
+Nobody edits the worker list by hand. When engine pods come and go (a rollout,
+scaling, a restart), it updates itself:
+
+1. **autoconfig** watches the model's engine pods and writes the Ready ones
+   into the `workers.yaml` key of the `<release>-cart-config` ConfigMap. A pod
+   that is terminating or not Ready is left out. It never writes an empty
+   list: with no Ready pod it keeps the last one.
+2. **Kubernetes** updates the mounted copy of that ConfigMap inside the CART
+   pods. This is the slow step, typically up to a minute or more.
+3. **The reload sidecar** in each CART pod sees the file change and sends CART
+   a reload signal.
+4. **CART** swaps in the new worker list without restarting and without
+   dropping requests. The prefix cache starts empty.
+
+End to end this took 65–80 s on the test cluster. Until then CART keeps
+sending to the pods it knew, including one that is shutting down; the engine
+chart's default drain keeps that pod serving through the gap (see
+[rolling-updates.md](rolling-updates.md#engine)). In between, CART's own health
+check stops sending to a pod that no longer answers after 3 failed checks, 10 s
+apart.
+
 ## How it behaves
 
-- **CART learns about engine pod changes late.** A new or removed engine pod
-  reaches CART about 65–80 s after it happens. Until then the old pod keeps
-  getting traffic and the new one gets none, so the engine's drain must cover
-  that gap; see
-  [rolling-updates.md](rolling-updates.md#engine).
 - **Every reload starts the prefix cache cold.** Each scale event, engine
   rollout or engine restart empties it. Frequent scaling
   ([autoscaling.md](autoscaling.md)) keeps hit rates low.

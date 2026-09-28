@@ -1,9 +1,18 @@
 # Installing ModelSphere
 
-The whole path, from machines that have nothing on them to a model answering
-requests. [The README](../README.md) has the short version for a cluster that
-already exists; this is the same path with the detail, and the only place the
-steps are written out.
+This guide takes you from bare machines to a model answering requests, step by
+step. If you already have a Kubernetes cluster, the quick start in
+[the README](../README.md) is shorter.
+
+The diagram shows what you end up with. Requests enter through the routing
+layer (openresty, then the cache-aware router), which autoconfig keeps pointed
+at the engine pods. The engines (SGLang or vLLM, each with a hang-watcher)
+serve them. bodylog records every request, and from those records the scaling
+components decide how many engine replicas each model runs.
+
+<p align="center">
+  <img alt="ModelSphere architecture" src="../arch/modelsphere.svg" width="900">
+</p>
 
 ## Deployment, in three parts
 
