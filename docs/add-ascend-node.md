@@ -19,11 +19,10 @@ specific: the MindCluster chart, its values, and a smoke pod.
 | Step | How | Runs on | Mutates |
 |---|---|---|---|
 | 0. Gate: will cilium start on this kernel? | probe the eBPF pairs (below) | node | no |
-| 1. Leave the old cluster | `kubeadm reset` + cleanup (below) | node | yes |
-| 2. Prep node | `setup_k8s.yaml` (Ansible, `k8s_install_method=binary`) | control machine | yes |
-| 3. Join | `kubeadm join --config` (below) | node | yes |
-| 4. Label the node, then the device plugin | `kubectl label`, then helmfile | cluster | yes |
-| 5. Verify | `kubectl` + the smoke pod (below) | cluster | no |
+| 1. Prep node | `make setup-k8s-*` (Ansible, `k8s_install_method=binary`) | control machine | yes |
+| 2. Join | `kubeadm join --config` (below) | node | yes |
+| 3. Label the node, then the device plugin | `kubectl label`, then helmfile | cluster | yes |
+| 4. Verify | `kubectl` + the smoke pod (below) | cluster | no |
 
 Worked example throughout: one **Atlas 800T A2** (8× Ascend 910B3, Kylin V10,
 kernel 4.19.90, aarch64), called `ascend-1` below, joining a cluster running
@@ -90,62 +89,20 @@ which is the control worth running alongside.
 When a pair is missing, stop: the node needs a newer kernel first. On `ascend-1` the
 4.19 Kylin kernel was replaced in place with openEuler 22.03 SP4's 5.10 (the
 userspace, the Ascend driver and the data on the disks stayed), after which the
-same script passes and step 1 below is where the cluster work starts.
+same script passes and the steps below are where the cluster work starts.
 
 Other things that are **not** blockers, verified on the same node:
 
 | Concern | Outcome |
 |---|---|
-| cgroup v1 (kubelet ≥ 1.35 refuses by default) | works with `failCgroupV1: false`, patched in via `JoinConfiguration.patches` (step 3); kubelet only warns |
+| cgroup v1 (kubelet ≥ 1.35 refuses by default) | works with `failCgroupV1: false`, patched in via `JoinConfiguration.patches` (step 2); kubelet only warns |
 | containerd 1.7 (cluster runs 2.x) | works on 1.36; kubeadm warns that 1.7 lacks the CRI `RuntimeConfig` method and that the fallback goes away in **1.37** — upgrade containerd before the cluster does |
 | aarch64 | cilium, cilium-envoy, node-problem-detector, node-exporter images are multi-arch |
 | NVIDIA DaemonSets | gated by `nvidia.com/gpu.deploy.*` labels and `pci-15b3` (Mellanox); Huawei NICs (`19e5`) match neither, nothing lands |
 
 ---
 
-## 1. Leave the old cluster
-
-Only if the machine comes from one. `kubeadm reset` **against the CRI socket it
-actually used** — KubeKey/KubeSphere nodes run cri-dockerd, and resetting the
-containerd socket instead leaves every old pod running:
-
-```bash
-kubeadm reset -f --cri-socket unix:///var/run/cri-dockerd.sock   # or containerd.sock
-```
-
-> ⚠️ **Unmount before anything deletes `/var/lib/kubelet`.** `k3s-uninstall.sh`
-> runs `rm -rf /var/lib/kubelet`; with a JuiceFS (or any network) CSI volume still
-> mounted under it, that `rm` reaches through the mount and deletes the data on
-> the remote filesystem. Check first, and do not continue until it is empty:
->
-> ```bash
-> mount | grep /var/lib/kubelet
-> ```
-
-Then the leftovers, in this order:
-
-```bash
-systemctl disable --now kubelet cri-dockerd k3s 2>/dev/null
-ip link del tunl0 2>/dev/null; ip link del cali+ 2>/dev/null   # calico
-umount /run/calico/cgroup 2>/dev/null
-rm -rf /etc/cni/net.d/* /var/lib/cni /opt/cni/bin/calico*
-```
-
-> ⚠️ **Do not clean iptables with `iptables-save | grep -v ... | iptables-restore`.**
-> That is a whole-table rewrite, not a delete: filtering by keyword leaves chain
-> definitions and references out of step, and a restore that fails midway can take
-> the management path down with it. Measured once here: a node lost both ping
-> and SSH and had to be power-cycled out of band. `kubeadm reset`
-> removes its own rules; deleting `/etc/cni/net.d/*` and the interfaces is enough
-> for the CNI ones.
-
-Keep: docker and whatever it runs outside Kubernetes, data mounts outside
-kubelet's tree, the vendor driver and runtime.
-
-The old cluster's API server still lists the node as `NotReady`; whoever owns
-that cluster has to `kubectl delete node` it.
-
-## 2. Prep the node
+## 1. Prep the node
 
 The same Ansible play every other node goes through — `setup_k8s.yaml` — with
 the install method switched over. There is no separate script for this: node
@@ -182,8 +139,9 @@ flaky network rather than a missing setting.
 Then, against whichever inventory holds it:
 
 ```bash
-ansible-playbook -i <inventory> setup_k8s.yaml -l ascend910b-207 --tags online,offline
-ansible-playbook -i <inventory> network_accesslator.yaml -l ascend910b-207   # certs.d mirrors
+make setup-k8s-online  INVENTORY=<inventory> LIMIT=<node>
+make setup-k8s-offline INVENTORY=<inventory> LIMIT=<node>
+make setup-mirror      INVENTORY=<inventory> LIMIT=<node>   # certs.d mirrors
 ```
 
 What the `binary` path does differently, and nothing else does:
@@ -206,7 +164,7 @@ pull timeout, `certs.d` — is the shared path, unchanged from the Ubuntu nodes.
 > removed v1 shim (`io.containerd.runtime.v1.linux`), which containerd 2.x will
 > not start with. Patching the vendor's file would have kept that.
 
-## 3. Join
+## 2. Join
 
 Not the bare `kubeadm join` line from `kubeadm-cluster-init.md` — an older host
 needs kubelet overrides, and they have to be in place *during* the join. Get a
@@ -265,7 +223,7 @@ Why each piece:
 If the node is already joined, do not join again — put those same two keys into
 `/var/lib/kubelet/config.yaml` and restart kubelet.
 
-## 4. Label the node and deploy the device plugin
+## 3. Label the node and deploy the device plugin
 
 Labels first — the device plugin's DaemonSet selects on `workerselector`, and
 the `nvidia.com/gpu.deploy.*` ones keep the GPU operator's DaemonSets off a node
@@ -285,7 +243,7 @@ kubectl label node ascend910b-207 --overwrite \
     nvidia.com/gpu.deploy.mig-manager=false
 ```
 
-The compute-only taint is set at registration (step 3's `JoinConfiguration`); to
+The compute-only taint is set at registration (step 2's `JoinConfiguration`); to
 reconcile it later use the same script the NVIDIA nodes use, pointed at this resource:
 
 ```bash
@@ -336,7 +294,7 @@ The plugin is a helmfile release like every other component, and the chart is
 `/dev/davinci*` and `npu-smi` from inside the container — on `ascend-1` it got
 a card with only that `/dev/davinciN` and `/dev/davinci_manager` mounted.
 
-## 5. Verify
+## 4. Verify
 
 ```bash
 kubectl get node ascend910b-207                    # Ready
@@ -361,28 +319,3 @@ Then the card itself:
 ```bash
 kubectl apply -f ascend/smoke-pod.yaml && kubectl logs ascend-smoke
 ```
-
-## Status of `ascend-1` (2026-09-22)
-
-In `the cluster` as `ascend910b-207`, schedulable, step 5's checks **ALL PASS**:
-cilium healthy (10/10, kube-proxy replacement on; host routing is Legacy, same
-as every other node in this cluster — that follows from the cluster's datapath
-config, not from the node), Service ClusterIP and cross-node pod traffic
-verified from a pod on the node, `huawei.com/Ascend910: 8` allocatable and a
-pod-level `npu-smi` smoke test passing.
-
-Kernel `5.10.0-332.0.0.233.oe2203sp4` (openEuler) on Kylin V10 userspace, with
-4.19.90-52.55 still installed as a fallback boot entry. Driver 25.5.0 rebuilt
-via DKMS for that kernel — **every future kernel update needs the same rebuild**,
-and the distro gcc cannot do it (the node keeps a private gcc 10 for this).
-8 cards healthy, `hccn` interconnect IPs unchanged.
-
-A vllm-ascend service (Qwen3-8B on one card) was served end to end on it
-through a ClusterIP Service: `/v1/models`, non-streaming and streaming chat all
-answered, 16 concurrent requests finished in 6s.
-
-Left over: the old KubeSphere cluster still lists the node as `NotReady` and its
-owner has to `kubectl delete node`; `/root/kernel-upgrade*` holds ~1.5G of
-staged rpms, the private gcc and build scratch that can be deleted once the node
-has run for a while (keep `$WORK/gcc10-shim` if you expect kernel updates —
-every future kernel needs the same dkms rebuild).
