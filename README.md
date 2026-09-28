@@ -79,14 +79,19 @@ helm upgrade --install qwen modelsphere/sglang -n llm-demo --create-namespace \
   -f <your values.yaml>       # models/examples/sglang-qwen.yaml is a worked example
 ```
 
-That first command installs **thirteen releases**, not just ours: alongside the
-routing layer, the autoscaler and the request log, it brings the NVIDIA GPU and
-network operators, kube-prometheus-stack, LeaderWorkerSet, Volcano, the
-descheduler and node-problem-detector. A cluster that already has any of them
-turns it off by name -- every release is a key under `enabled:` in
-[`environments/default.yaml`](environments/default.yaml), which is also the list
-of what you get. `helmfile -e <env> list` prints the same thing for your
-environment before you apply it.
+That first command installs **six releases, all of them ours**: openresty,
+bodylog, bodylog-exporter, autoconfig, the autoscaler and the SLO operator. The
+template you copied switches off the seven upstream components this repository
+can also install -- the NVIDIA GPU and network operators,
+kube-prometheus-stack, LeaderWorkerSet, Volcano, the descheduler and
+node-problem-detector -- on the assumption that a cluster you already have
+brings its own.
+
+Turn one back on by deleting its line from your environment file. A cluster with
+no GPU device plugin needs `gpuOperator`, or the engine pod stays `Pending`; one
+with no Prometheus needs `kubePrometheusStack`, or the autoscaler has nothing to
+read. `helmfile -e <env> list` shows exactly what your environment installs
+before you apply it.
 
 The model is served through the routing layer, at
 `http://openresty.llm-route.svc:8080/<release>/v1/chat/completions` -- the
