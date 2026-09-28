@@ -24,6 +24,12 @@
 # back at your own ChartMuseum or OCI registry.
 # chartRepo: https://charts.example.com/my-project
 
+# Charts from a local directory rather than over the network. A cluster with no
+# route out needs this as well as the two keys above: chartRepo is a URL it
+# cannot reach, while chartsDir is the bundle's own charts/ on this machine.
+# A chart missing from it still falls back to chartRepo.
+# chartsDir: /root/bundle/charts
+
 # `rewrite` when the cluster has no outbound network: the third-party charts and
 # images then come from the two addresses above as well, instead of from their
 # upstreams. Load the bundle into them first -- docs/offline-install.md has the
