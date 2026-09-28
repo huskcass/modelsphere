@@ -30,6 +30,13 @@ chart (`vllm`, `sglang`) creates its model's own `LLMScaler` and
 > qwen   1             5             1                 1
 > ```
 >
+>
+> Both signal sources also need Prometheus: the `Prometheus` provider queries it
+> directly, and decision-gen reads its live signals from it (`PROM_URL`). An
+> environment file copied from `environments/private.yaml.example` sets
+> `enabled.kubePrometheusStack: false`; turn it back on, or point both at a
+> Prometheus of your own.
+>
 > To turn scaling on, pick one of the two signal sources below and configure it.
 > [Scale on SLO targets](#scale-on-slo-targets-decision-gen) shows the missing
 > piece.

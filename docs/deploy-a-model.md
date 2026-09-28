@@ -7,8 +7,13 @@ GPUs, several nodes, the other engine — or to work out why a model that
 installed cleanly does not answer.
 
 It assumes the stack from [install step 6](install.md#6-install-the-stack) is
-running: openresty, autoconfig, the scaling and SLO operators, LWS, Volcano
-and the GPU operator.
+running -- at least our own six releases (openresty, bodylog, bodylog-exporter,
+autoconfig, llmscaleoperator, llm-slo), which is what an environment file
+copied from `environments/private.yaml.example` installs -- and that the GPU
+nodes advertise `nvidia.com/gpu`, either through the cluster's own device
+plugin or with `enabled.gpuOperator: true`. A multi-node model also needs
+`enabled.lws`, and `enabled.volcano` if it gang-schedules; that example file
+turns all three off.
 
 ## What one model is
 
@@ -515,9 +520,11 @@ The leader renders as `sglang serve ... --nnodes=2 --node-rank=0
 network operator's RDMA shared device plugin (`enabled.nicClusterPolicy`,
 off by default); drop it and the two lines above it on a cluster without an
 IB fabric. `podLabels: rdma-ib` only takes effect with the separate
-`modelsphere/rdma-injector` chart installed; step 6 does not install it. `schedulerName: volcano` needs Volcano and LWS gang scheduling,
-both on in `environments/default.yaml` — `scheduler/volcano/README.md` has
-the order in which they are switched on.
+`modelsphere/rdma-injector` chart installed; step 6 does not install it. `schedulerName: volcano` needs Volcano and LWS gang scheduling.
+Both are on in `environments/default.yaml` but off in
+`environments/private.yaml.example`; delete their `false` lines from your
+environment file to turn them back on. `scheduler/volcano/README.md` has the
+order in which they are switched on.
 
 ### vllm, one node, two GPUs
 
