@@ -16,7 +16,7 @@ Most day-to-day changes are to a model's values file.
 | To | Read |
 |---|---|
 | Deploy a new model, or remove one | [deploy-a-model.md](deploy-a-model.md) |
-| Set rate limits on a model's route, turn on API keys | [routing-and-rate-limiting.md](routing-and-rate-limiting.md) |
+| Set rate limits on a model's route, turn on API keys | [openresty.md](openresty.md) |
 | Tune the cache-aware router (CART) | [cart.md](cart.md) |
 | Let a model scale with load, or pin its replica count | [autoscaling.md](autoscaling.md) |
 | Upgrade or reconfigure anything without dropping requests | [rolling-updates.md](rolling-updates.md) |

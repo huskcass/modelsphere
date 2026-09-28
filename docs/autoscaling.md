@@ -16,7 +16,7 @@ several nodes.
   off.
 - Body logging works, because the scaling signals are derived from it. See the
   listener address in
-  [routing-and-rate-limiting.md](routing-and-rate-limiting.md#body-logging-the-listener-address).
+  [openresty.md](openresty.md#body-logging-the-listener-address).
 - The GPU nodes carry the `nvidia.com/gpu.product` label. The GPU operator's
   feature discovery sets it.
 
@@ -71,7 +71,7 @@ In the model's values file:
 | `sloRequirement.extraSpec.otps.default.metrics` | not set | Output-speed targets, in tokens/s per request. `{type: p80, threshold: 20}` means 80 % of requests should decode at 20 tok/s or faster |
 
 The same `ttft` and `otps` targets also set the route's admission limits in
-openresty; see [routing-and-rate-limiting.md](routing-and-rate-limiting.md).
+openresty; see [openresty.md](openresty.md).
 
 A model with neither `ttft` nor `otps` only scales up on `429`s and never
 scales down.

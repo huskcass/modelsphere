@@ -1,4 +1,4 @@
-# Routing and rate limiting
+# Openresty (Routing and rate limiting)
 
 Every model gets a route on openresty, the routing layer in front of the
 engines. openresty decides whether a request is admitted and which engine pod
