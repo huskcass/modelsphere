@@ -71,9 +71,13 @@ enabled:
   llmDashboards: false        # Grafana dashboards -- same.
   nodeProblemDetector: false  # turns node faults into conditions.
   descheduler: false          # moves pods off nodes that drifted.
-  lws: false                  # LeaderWorkerSet: only for an engine instance
-                              # that spans several nodes.
-  volcano: false              # gang scheduling, for the same case.
+  lws: false                  # LeaderWorkerSet: needed only by an engine
+                              # instance that spans several nodes (lws.enabled
+                              # in the engine chart).
+  volcano: false              # gang scheduling for such a group. Nothing uses
+                              # it unless your model values set
+                              # `schedulerName: volcano`; the engine charts
+                              # default to the cluster's own scheduler.
   volcanoPdb: false
 
 # cilium:
