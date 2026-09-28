@@ -79,10 +79,20 @@ helm upgrade --install qwen modelsphere/sglang -n llm-demo --create-namespace \
   -f <your values.yaml>       # models/examples/sglang-qwen.yaml is a worked example
 ```
 
+That first command installs **thirteen releases**, not just ours: alongside the
+routing layer, the autoscaler and the request log, it brings the NVIDIA GPU and
+network operators, kube-prometheus-stack, LeaderWorkerSet, Volcano, the
+descheduler and node-problem-detector. A cluster that already has any of them
+turns it off by name -- every release is a key under `enabled:` in
+[`environments/default.yaml`](environments/default.yaml), which is also the list
+of what you get. `helmfile -e <env> list` prints the same thing for your
+environment before you apply it.
+
 The model is served through the routing layer, at
 `http://openresty.llm-route.svc:8080/<release>/v1/chat/completions` -- the
 release name from step 2 is the path prefix (`qwen` above), and it is how the
-router picks the model.
+router picks the model, so a request to plain `/v1/chat/completions` comes back
+502 from openresty with every component healthy.
 
 ```bash
 kubectl -n llm-route port-forward svc/openresty 8080:8080 &
