@@ -18,7 +18,7 @@ specific: the MindCluster chart, its values, and a smoke pod.
 
 | Step | How | Runs on | Mutates |
 |---|---|---|---|
-| 0. Gate: will cilium start on this kernel? | probe the eBPF pairs (below) | node | no |
+| 0. Requirements | kernel 5.10+, and the rest of the table below | node | no |
 | 1. Prep node | `make setup-k8s-*` (Ansible, `k8s_install_method=binary`) | control machine | yes |
 | 2. Join | `kubeadm join --config` (below) | node | yes |
 | 3. Label the node, then the device plugin | `kubectl label`, then helmfile | cluster | yes |
@@ -31,76 +31,26 @@ measured, that is the host it was measured on.
 
 ---
 
-## 0. Gate: kernel vs. Cilium — check this first
+## 0. Requirements
 
-Cilium 1.20 refuses to start unless the kernel passes `CheckRequirements()`
-(`pkg/datapath/linux/requirements.go`). It is a hard gate: there is no config
-flag, `CiliumNodeConfig` or per-node override that skips it. Upstream this means
-**kernel 5.10+**.
+| Requirement | Detail |
+|---|---|
+| **kernel 5.10+** | Cilium refuses to start below it, and no flag, `CiliumNodeConfig` or per-node override skips the check. **A vendor 4.19 with eBPF backports is still a fail** -- Kylin V10's passes every generic eBPF probe and misses six of the exact (program type, helper) pairs Cilium asks for, so the node joins and cilium-agent then crash-loops. Replace the kernel first; that is a host-lifecycle job outside this repo |
+| aarch64 | fine: cilium, cilium-envoy, node-problem-detector and node-exporter are multi-arch |
+| cgroup v1 | fine, with `failCgroupV1: false` in step 2's join patches; kubelet only warns |
+| containerd 1.7 | works on k8s 1.36, and kubeadm warns the fallback goes away in **1.37** -- upgrade containerd before the cluster does |
+| NVIDIA DaemonSets | do not land here: gated by `nvidia.com/gpu.deploy.*` labels and `pci-15b3`, and Huawei NICs (`19e5`) match neither |
 
-Vendor kernels make this easy to misjudge. Kylin's 4.19 backports most of the
-eBPF you would check for — BTF, bounded loops, large programs, `fib_lookup`,
-`redirect_neigh` all probe fine — so "the kernel looks recent enough" is not
-evidence. Only the exact (program type, helper) pairs Cilium asks for are. Probe
-them with the bpftool from the cilium image itself, so the answer comes from the
-same library version the agent will use:
+`uname -r` settles the kernel. To check it exactly rather than by version number,
+run the bpftool in the cilium image your cluster runs -- an empty output is a
+fail, not a pass -- and compare against a node that already runs cilium:
 
 ```bash
-# on the candidate node, read-only -- use the cilium version YOUR cluster runs
-# (versions.cilium in environments/default.yaml)
-docker run --rm --privileged --net host quay.io/cilium/cilium:v1.20.0 \
+docker run --rm --privileged --net host quay.io/cilium/cilium:<your version> \
     bpftool feature probe kernel > /tmp/probe.txt
-# containerd-only hosts:
-#   ctr -n k8s.io run --rm --privileged --net-host quay.io/cilium/cilium:v1.20.0 \
-#       probe bpftool feature probe kernel > /tmp/probe.txt
-
-# then, for each pair below, check it is listed under its program type:
-awk '/^eBPF helpers supported for program type/{pt=$NF} pt=="sched_cls:"' /tmp/probe.txt | grep bpf_redirect_peer
 ```
 
-The pairs `CheckRequirements()` checks, with the kernel that first shipped each:
-
-| program type | helper | since |
-|---|---|---|
-| sched_cls | `bpf_skb_change_tail` | 4.9 |
-| cgroup_sock_addr | `bpf_get_socket_cookie` | 4.12 |
-| cgroup_sock_addr | `bpf_get_current_cgroup_id` | 4.18 |
-| sched_cls | `bpf_fib_lookup` | 4.18 |
-| cgroup_sock, cgroup_sock_addr, sched_cls, xdp | `bpf_jiffies64` | 5.6 |
-| cgroup_sock, cgroup_sock_addr | `bpf_get_netns_cookie` | 5.7 |
-| sched_cls | `bpf_sk_assign` | 5.7 |
-| cgroup_sock_addr | `bpf_get_cgroup_classid` | 5.7 |
-| cgroup_sock_addr | `bpf_perf_event_output` | 5.7 |
-| sched_cls | `bpf_csum_level` | 5.8 |
-| sched_cls | `bpf_skb_change_head` | 5.8 |
-| sched_cls | `bpf_redirect_neigh` | 5.10 |
-| sched_cls | `bpf_redirect_peer` | 5.10 |
-
-plus `Large program size limit is available` in the same output (5.2).
-
-An empty probe output is **not** a pass — it means the probe did not run, and
-the honest reading is "unknown", which here has to be treated as a fail.
-
-On that host (Kylin V10 4.19.90-52) six pairs were missing —
-`bpf_get_current_cgroup_id` in cgroup_sock_addr, `bpf_get_netns_cookie` in both
-cgroup types, `bpf_sk_assign`, `bpf_csum_level` and `bpf_redirect_peer` in
-sched_cls. Every generic eBPF probe had passed, the node joined fine, and then
-cilium-agent crash-looped. A regular cluster node (Ubuntu 5.15) has all of them,
-which is the control worth running alongside.
-
-When a pair is missing, stop: the node needs a newer kernel first. There the
-4.19 Kylin kernel was replaced in place with openEuler 22.03 SP4's 5.10 (the
-userspace, the Ascend driver and the data on the disks stayed), after which the
-same script passes and the steps below are where the cluster work starts.
-
-Other things that are **not** blockers, verified on the same node:
-
-| Concern | Outcome |
-|---|---|
-| cgroup v1 (kubelet ≥ 1.35 refuses by default) | works with `failCgroupV1: false`, patched in via `JoinConfiguration.patches` (step 2); kubelet only warns |
-| containerd 1.7 (cluster runs 2.x) | works on 1.36; kubeadm warns that 1.7 lacks the CRI `RuntimeConfig` method and that the fallback goes away in **1.37** — upgrade containerd before the cluster does |
-| aarch64 | cilium, cilium-envoy, node-problem-detector, node-exporter images are multi-arch |
-| NVIDIA DaemonSets | gated by `nvidia.com/gpu.deploy.*` labels and `pci-15b3` (Mellanox); Huawei NICs (`19e5`) match neither, nothing lands |
+The pairs it must list are in Cilium's own `pkg/datapath/linux/requirements.go`.
 
 ---
 
