@@ -81,10 +81,11 @@ flaky network rather than a missing setting.
 Then, against whichever inventory holds it:
 
 ```bash
-make setup-k8s-online  INVENTORY=<inventory> LIMIT=<node>
-make setup-k8s-offline INVENTORY=<inventory> LIMIT=<node>
-make setup-mirror      INVENTORY=<inventory> LIMIT=<node>   # certs.d mirrors
+make setup-all INVENTORY=<inventory> LIMIT=<node>
 ```
+
+The same step every node goes through ([install step 2](install.md#2-node-prep-ansible));
+`LIMIT` keeps it to this one.
 
 What the `binary` path does differently, and nothing else does:
 
