@@ -25,8 +25,9 @@ specific: the MindCluster chart, its values, and a smoke pod.
 | 4. Verify | `kubectl` + the smoke pod (below) | cluster | no |
 
 Worked example throughout: one **Atlas 800T A2** (8× Ascend 910B3, Kylin V10,
-kernel 4.19.90, aarch64), called `ascend-1` below, joining a cluster running
-k8s v1.36.3, Cilium 1.20 and containerd 2.x on its other nodes.
+kernel 4.19.90, aarch64) joining a cluster running k8s v1.36.3, Cilium 1.20 and
+containerd 2.x on its other nodes. Where this document says a thing was
+measured, that is the host it was measured on.
 
 ---
 
@@ -45,7 +46,8 @@ them with the bpftool from the cilium image itself, so the answer comes from the
 same library version the agent will use:
 
 ```bash
-# on the candidate node, read-only
+# on the candidate node, read-only -- use the cilium version YOUR cluster runs
+# (versions.cilium in environments/default.yaml)
 docker run --rm --privileged --net host quay.io/cilium/cilium:v1.20.0 \
     bpftool feature probe kernel > /tmp/probe.txt
 # containerd-only hosts:
@@ -79,14 +81,14 @@ plus `Large program size limit is available` in the same output (5.2).
 An empty probe output is **not** a pass — it means the probe did not run, and
 the honest reading is "unknown", which here has to be treated as a fail.
 
-On `ascend-1` (Kylin V10 4.19.90-52) six pairs were missing —
+On that host (Kylin V10 4.19.90-52) six pairs were missing —
 `bpf_get_current_cgroup_id` in cgroup_sock_addr, `bpf_get_netns_cookie` in both
 cgroup types, `bpf_sk_assign`, `bpf_csum_level` and `bpf_redirect_peer` in
 sched_cls. Every generic eBPF probe had passed, the node joined fine, and then
 cilium-agent crash-looped. A regular cluster node (Ubuntu 5.15) has all of them,
 which is the control worth running alongside.
 
-When a pair is missing, stop: the node needs a newer kernel first. On `ascend-1` the
+When a pair is missing, stop: the node needs a newer kernel first. There the
 4.19 Kylin kernel was replaced in place with openEuler 22.03 SP4's 5.10 (the
 userspace, the Ascend driver and the data on the disks stayed), after which the
 same script passes and the steps below are where the cluster work starts.
@@ -131,8 +133,8 @@ Put the node in an inventory. [`inventory-ascend.ini.example`](../inventory-asce
 is the shape, with every variable that differs from an Ubuntu node and why it is
 there; copy it and fill in the host.
 
-Do not skip `http_proxy` there if your nodes need one: github is not reachable
-directly from ours, and dl.k8s.io is — so without it kubeadm, kubelet and
+Do not skip `http_proxy` there if your nodes need one. A network that reaches
+dl.k8s.io but not github fails in a way that misleads: kubeadm, kubelet and
 kubectl install fine and only the crictl download times out, which reads like a
 flaky network rather than a missing setting.
 
@@ -189,7 +191,7 @@ discovery:
     token: "<token>"
     caCertHashes: ["sha256:<hash>"]
 nodeRegistration:
-  name: "ascend910b-207"
+  name: "<node>"                    # see the naming note below
   criSocket: unix:///run/containerd/containerd.sock
   taints:
     - {key: "huawei.com/Ascend910", value: "compute-only", effect: "NoSchedule"}
@@ -207,7 +209,8 @@ kubeadm join --config /etc/kubernetes/join.yaml && rm -f /etc/kubernetes/join.ya
 
 Why each piece:
 
-- **node name** follows `<accelerator>-<last IP octet>` instead of the vendor hostname.
+- **node name** follows `<accelerator>-<last IP octet>` -- `ascend910b-207`, say --
+  instead of the vendor hostname, which on these hosts is whatever the vendor set.
 - **taint at registration**, so no general pod lands in the window before the
   labels go on. Same idea as `script/taint_gpu_nodes.sh` for NVIDIA nodes.
 - **kubelet overrides via `patches:`, not by editing afterwards.** kubeadm
@@ -231,7 +234,7 @@ that has no NVIDIA card (its validator and toolkit pods otherwise land here and
 fail):
 
 ```bash
-kubectl label node ascend910b-207 --overwrite \
+kubectl label node <node> --overwrite \
     accelerator=huawei-Ascend910 \
     workerselector=dls-worker-node \
     node.modelsphere.dev/accelerator=ascend-910b \
@@ -291,15 +294,15 @@ The plugin is a helmfile release like every other component, and the chart is
   environment of a cluster that has Ascend nodes.
 
 `smoke-pod.yaml` requests one card and prints `ASCEND_VISIBLE_DEVICES`,
-`/dev/davinci*` and `npu-smi` from inside the container — on `ascend-1` it got
-a card with only that `/dev/davinciN` and `/dev/davinci_manager` mounted.
+`/dev/davinci*` and `npu-smi` from inside the container — a pod gets one card,
+with only that `/dev/davinciN` and `/dev/davinci_manager` mounted.
 
 ## 4. Verify
 
 ```bash
-kubectl get node ascend910b-207                    # Ready
-kubectl get pods -A -o wide --field-selector spec.nodeName=ascend910b-207
-kubectl get node ascend910b-207 -o jsonpath='{.status.allocatable}' | jq '."huawei.com/Ascend910"'
+kubectl get node <node>                            # Ready
+kubectl get pods -A -o wide --field-selector spec.nodeName=<node>
+kubectl get node <node> -o jsonpath='{.status.allocatable}' | jq '."huawei.com/Ascend910"'
 kubectl -n kube-system exec <cilium-pod-on-the-node> -c cilium-agent -- cilium-dbg status
 ```
 
