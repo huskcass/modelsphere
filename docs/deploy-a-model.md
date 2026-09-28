@@ -8,9 +8,7 @@ installed cleanly does not answer.
 
 It assumes the stack from [install step 6](install.md#6-install-the-stack) is
 running: openresty, autoconfig, the scaling and SLO operators, LWS, Volcano
-and the GPU operator. To change a model that is already serving, see
-[rolling-updates.md](rolling-updates.md). The values this page mentions are
-indexed in [configuration.md](configuration.md).
+and the GPU operator.
 
 ## What one model is
 
@@ -106,9 +104,11 @@ weights is not this repository's job.
 | `modelCheck.enabled` | `true` | an init container, `model-check`, that runs in the engine image without a GPU and fails if the directory is empty or incomplete |
 | `modelCheck.requiredGlobs` | `["config.json"]` | each glob must match something **directly** under the mount path |
 
-Add the weight files to the check. A half-copied directory then fails in
-seconds with a message that names it, instead of after a multi-minute load
-with a stack trace:
+Add the weight files to the check. A directory with no weight files yet then
+fails in seconds with a message that names it, instead of after a
+multi-minute load with a stack trace. Each glob only needs one match, so a
+partial copy that already has one shard still passes; finish the copy before
+installing:
 
 ```yaml
 modelCheck:
@@ -154,7 +154,7 @@ More in [routing-and-rate-limiting.md](routing-and-rate-limiting.md) and
 | `modelRoute.nginx.values` | `expose_routed_peer: "true"` | knobs rendered into openresty's route table (`ttft_limit_ms`, `tps_limit_tps`, `default_max`, ...). **Set `expose_routed_peer: "false"` on any route reachable from outside the cluster**, or every caller sees your pod IPs and node names in `X-Routed-Peer` |
 | `modelRoute.nginx.peers` | `backend` (priority 2, `maxConcurrency: 100`), `backend-svc` (priority 1) | tiers; traffic moves down a tier only when every peer above it is banned. With CART on, a `use: cart` tier is added on top for you |
 | `modelRoute.discovery.includeNotReady` | `false` | only Ready engine pods are routed to |
-| `modelRoute.slo.enabled` | `true` | route thresholds come from the LLMSLORequirement rather than static `nginx.values` |
+| `modelRoute.slo.enabled` | `true` | route thresholds come from the LLMSLORequirement once it declares targets (`sloRequirement.extraSpec`); the chart's default object has none, so the route reports `NothingApplicable` and keeps the static `nginx.values` |
 | `modelRoute.cart.maxLoad` | `20` | per-worker `max_load` written for CART |
 | `cart.enabled` | `true` | deploys this model's CART **and** routes through it — the only switch |
 | `cart.nodeSelector`, `cart.tolerations`, `cart.resources` | subchart defaults | CART needs no GPU; keep it off scarce GPU nodes |
@@ -182,8 +182,10 @@ the rest of the rollout settings.
 Two render-time checks keep the numbers consistent, and fail `helm install`
 with the arithmetic spelled out:
 
-- `terminationGracePeriodSeconds` must cover `endpointSyncSeconds +
-  drainSeconds + shutdownReserveSeconds` (vllm: `+ shutdownTimeout`).
+- `terminationGracePeriodSeconds` must cover the shutdown budget: on sglang
+  `endpointSyncSeconds + drainSeconds + shutdownReserveSeconds`, on vllm
+  `endpointSyncSeconds + drainSeconds + shutdownTimeout` (the vllm chart has
+  no `shutdownReserveSeconds`).
 - On a Deployment, `progressDeadlineSeconds` must exceed
   `startupProbe.failureThreshold × periodSeconds`. At the defaults that
   allows a `failureThreshold` of up to 179; beyond it, raise
@@ -201,7 +203,7 @@ More in [autoscaling.md](autoscaling.md).
 | `scaler.serverAddress` | `http://decision-gen.llm-scaler.svc:80` / `http://prometheus-operated.monitoring.svc:9090` | both are installed by step 6 |
 | `scaler.scaleDown.stabilizationWindowSeconds`, `maxStepReplicas` | `10`, `0` / `0`, `0` | the chart's own comments suggest `300` and `1` in production |
 | `sloRequirement.enabled` | `true` | |
-| `sloRequirement.extraSpec` | `{}` | latency targets, passed through as written (e.g. `ttftMs`, `tpotMs`) |
+| `sloRequirement.extraSpec` | `{}` | merged verbatim into the LLMSLORequirement's `spec`, in the CRD's own shape: `ttft`, `otps`, `minimumDeployment`, `maximumDeployment`, `priority`. Unknown fields are dropped silently. **Without `maximumDeployment`, decision-gen does not manage the model**, so a `Custom` scaler holds at `minReplicas` — see [autoscaling.md](autoscaling.md#scale-on-slo-targets-decision-gen) |
 | `serviceId` | release name | the id the decision server, the SLO object and the route share |
 
 For a fixed replica count, set `scaler.enabled: false` and `replicaCount`
@@ -216,7 +218,7 @@ For a fixed replica count, set `scaler.enabled: false` and `replicaCount`
 | `lws.replicas` | `1` | groups; only read with the scaler off |
 | `lws.distPort` | `29500` | the rendezvous port inside the group |
 | `lws.waitForLeader` | `true` | workers wait in a `wait-leader` init container until the leader's port opens |
-| `podLabels` | `{}` | `rdma-ib: "true"` has the rdma-injector webhook set the per-node NCCL IB environment |
+| `podLabels` | `{}` | `rdma-ib: "true"` has the rdma-injector webhook set the per-node NCCL IB environment. That webhook is the separate `modelsphere/rdma-injector` chart, **not installed by step 6**; without it the label does nothing |
 | `securityContext` | `{}` | `capabilities.add: ["IPC_LOCK"]` on an IB fabric, so RDMA can pin memory |
 
 Under LWS the Service is `<release>-leader` and selects only the leader,
@@ -338,9 +340,13 @@ On vllm, or under LWS, port-forward the Service instead and ask from your
 own machine:
 
 ```bash
-kubectl -n llm-demo port-forward svc/qwen 8000:8000             # vllm
-kubectl -n llm-demo port-forward svc/qwen-leader 30000:30000    # sglang under LWS
+# vllm
+kubectl -n llm-demo port-forward svc/qwen 8000:8000 &
 curl -s localhost:8000/v1/models
+
+# sglang under LWS
+kubectl -n llm-demo port-forward svc/qwen-leader 30000:30000 &
+curl -s localhost:30000/v1/models
 ```
 
 The `id` it returns is `model.name` — the string clients send as `"model"`.
@@ -372,6 +378,9 @@ kubectl -n llm-route get cm openresty-conf \
 kubectl -n llm-demo get cm qwen-cart-config -o jsonpath='{.data.workers\.yaml}'
 kubectl -n llm-demo exec deploy/qwen -c sglang -- curl -s qwen-cart:8071/v1/models
 ```
+
+Under LWS there is no `deploy/qwen`; exec into the leader pod instead
+(`kubectl -n llm-demo exec qwen-0 -c sglang -- ...`). On vllm, use `-c vllm`.
 
 **5. Through openresty, from inside the cluster.**
 
@@ -505,7 +514,8 @@ The leader renders as `sglang serve ... --nnodes=2 --node-rank=0
 `--node-rank=${LWS_WORKER_INDEX}`. `rdma/hca_shared` comes from the
 network operator's RDMA shared device plugin (`enabled.nicClusterPolicy`,
 off by default); drop it and the two lines above it on a cluster without an
-IB fabric. `schedulerName: volcano` needs Volcano and LWS gang scheduling,
+IB fabric. `podLabels: rdma-ib` only takes effect with the separate
+`modelsphere/rdma-injector` chart installed; step 6 does not install it. `schedulerName: volcano` needs Volcano and LWS gang scheduling,
 both on in `environments/default.yaml` — `scheduler/volcano/README.md` has
 the order in which they are switched on.
 
@@ -536,6 +546,9 @@ startupProbe:
 scaler:
   metricProvider: Custom         # the decision server the sglang chart uses by default
   serverAddress: "http://decision-gen.llm-scaler.svc:80"
+sloRequirement:
+  extraSpec:
+    maximumDeployment: { value: 4 }   # without this, decision-gen ignores the model
 modelRoute:
   nginx:
     outputConfigMap: "llm-route/openresty-conf"
@@ -587,9 +600,15 @@ if that is not an option: delete the `session_route_<route>.conf` key from
 kubectl -n llm-demo patch modelroute qwen --type=merge -p '{"metadata":{"finalizers":null}}'
 ```
 
-Renaming a route (`modelRoute.nginx.route`) needs none of this: autoconfig
-removes the key it last wrote (`status.appliedRouteKey`) and writes the new
-one.
+Renaming a route (`modelRoute.nginx.route`) writes the new key but **does not
+remove the old one**: autoconfig cannot know whether callers still use the
+old path, so it lists the key in `status.orphanRouteKeys` and sets an
+`OrphanRouteKey` condition. Once nothing calls the old path, delete that key
+from `openresty-conf` by hand; the condition clears on its own.
+
+```bash
+kubectl -n llm-demo get modelroute qwen -o jsonpath='{.status.orphanRouteKeys}{"\n"}'
+```
 
 ## 8. Troubleshooting
 

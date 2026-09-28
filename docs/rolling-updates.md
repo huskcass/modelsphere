@@ -8,13 +8,6 @@ and the CRDs. For each component it answers three questions:
 - What keeps requests flowing while it rolls?
 - Where do requests still fail, and what do you do about it?
 
-The index of the configuration docs is [configuration.md](configuration.md). How
-requests are routed is in
-[routing-and-rate-limiting.md](routing-and-rate-limiting.md), CART is covered in
-[cart.md](cart.md), and installing a model is in
-[deploy-a-model.md](deploy-a-model.md). The LLMScaler is covered in
-[autoscaling.md](autoscaling.md).
-
 **Most failures come from engine rollouts, not from rolling the routers.** On
 the test cluster, every gateway component rolled without dropping a single
 request. The engine with chart defaults did drop requests. The fix is two values
@@ -87,8 +80,9 @@ These changes do not restart the engine:
     engine's children after `shutdownReserveSeconds`.
   - vLLM with the default `shutdownTimeout: 0` aborts whatever is still running.
 - **Render-time checks.** The chart refuses a `terminationGracePeriodSeconds`
-  smaller than `endpointSyncSeconds + drainSeconds + shutdownReserveSeconds`
-  (on vLLM, `+ shutdownTimeout`). It also refuses a `progressDeadlineSeconds`
+  smaller than the shutdown budget: `endpointSyncSeconds + drainSeconds +
+  shutdownReserveSeconds` on SGLang, and `endpointSyncSeconds + drainSeconds +
+  shutdownTimeout` on vLLM. It also refuses a `progressDeadlineSeconds`
   that does not clear the startup budget.
 
 ### The default is sized for a plain ClusterIP, not for this stack
@@ -106,7 +100,7 @@ showed:
 
 The rollout itself finished in 92s. The `backend-svc` tier was never used.
 
-**Set these in every model release:**
+**Set these in every SGLang model release:**
 
 ```yaml
 terminationGracePeriodSeconds: 150
@@ -124,9 +118,24 @@ then.
 
 The trade-off is that a deleted pod holds its GPUs for up to
 `terminationGracePeriodSeconds`. Raise `drainSeconds`, and the grace period with
-it, if your responses stream for longer than about 30s. For vLLM, the equivalent
-values are the same keys plus `lifecycle.shutdownTimeout`. Unverified: the vLLM
-chart was not tested.
+it, if your responses stream for longer than about 30s.
+
+The vLLM chart has no `shutdownReserveSeconds`, and its values schema rejects
+the key, so the block above fails to render there. Its budget is
+`endpointSyncSeconds + drainSeconds + lifecycle.shutdownTimeout`. The
+equivalent vLLM block comes from the chart; it was not measured:
+
+```yaml
+terminationGracePeriodSeconds: 150
+lifecycle:
+  preStop:
+    endpointSyncSeconds: 90
+    drainSeconds: 30
+  shutdownTimeout: 20   # 90 + 30 + 20 = 140 <= 150; needs vLLM >= 0.18.0
+```
+
+With `shutdownTimeout: 0` (the default), vLLM aborts whatever is still running
+at SIGTERM instead of finishing it.
 
 ### Where requests can still fail
 
@@ -231,8 +240,9 @@ kubectl -n <ns> rollout status deploy/<release>-cart
   images follow that version (`models/images.yaml.gotmpl`), so the next model
   apply after the bump rolls every CART.
 - **Affinity resets.** CART's prefix-affinity state lives in the process, so a
-  failover starts cold. Expect the cache hit rate to dip for a while; this is
-  not an error.
+  failover starts cold. So does every worker-list reload: CART rebuilds its
+  router and discards the tree, so every engine rollout or scale event resets
+  it too. Expect the cache hit rate to dip for a while; this is not an error.
 
 ## openresty
 
@@ -397,10 +407,13 @@ renaming or removing them is a migration, not an upgrade.
 ## Before you roll
 
 1. **Diff first.** `make helm-diff SELECTOR=name=<release>` shows whether the
-   change touches the pod template (a rollout) or only config. If it touches
-   CART's `baseConfig`, plan a `rollout restart` of CART as well.
+   change touches the pod template (a rollout) or only config. For a model
+   release, add `MODELS=models/<file>.yaml`: without it the release is not in
+   the helmfile state and nothing matches. If the change touches CART's
+   `baseConfig`, plan a `rollout restart` of CART as well.
 2. **Check the release status.** `make helm-status` should say `ok` for the
-   release, not `failed` or `pending-upgrade`.
+   release, not `failed` or `pending-upgrade`. Pass the same `MODELS=` for a
+   model release; without it the release shows as `unmanaged`.
 3. **Check the engine's shutdown settings.** The model release should have
    `endpointSyncSeconds` of at least 90 and a grace period that covers the sum.
 4. **Check GPUs for the surge.** There should be one replica's worth free (a
@@ -441,8 +454,8 @@ Gateway's `Host` header. A request counted as good only if it returned 200
 Timings from the default-settings engine run:
 
 - The rollout, surging onto the spare GPU, finished 92s after it started.
-- openresty reloaded its route about 16s after that.
-- CART reloaded its workers 65–80s after that.
+- openresty reloaded its route about 16s after the rollout finished.
+- CART reloaded its workers 65–80s after the rollout finished.
 
 With the recommended settings, traffic reached the new pod about 27s after the
 old pod was deleted.

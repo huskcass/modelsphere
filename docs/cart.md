@@ -6,15 +6,7 @@ replica's KV cache is reused. When that replica is too busy, the least-loaded
 replica gets the request instead.
 
 This page describes every setting CART reads, how the chart and autoconfig
-build its config file, and which settings can change without a restart. It is
-part of the [configuration reference](configuration.md). Related pages:
-
-- [routing-and-rate-limiting.md](routing-and-rate-limiting.md): how openresty
-  sends traffic to CART, and what happens behind it.
-- [deploy-a-model.md](deploy-a-model.md): the model values file that turns CART
-  on.
-- [autoscaling.md](autoscaling.md) and [rolling-updates.md](rolling-updates.md):
-  what happens to CART when the set of engine pods changes.
+build its config file, and which settings can change without a restart.
 
 > ⚠️ **Only `workers` can be reloaded.** On `SIGHUP` (which the reload sidecar
 > sends whenever the ConfigMap changes), CART can change its worker list and
@@ -108,10 +100,14 @@ In each case it keeps the last config instead of wiping it.
 
 Here is the sequence when an engine pod is replaced:
 
-1. **The old pod fails its health checks.** CART stops sending to it after
-   `failure_threshold` failed checks (`Worker … marked unhealthy after 3
+1. **CART keeps sending to the old pod.** While the old pod runs its preStop
+   drain, the engine keeps serving and its `/health` still passes, so CART's
+   health checks do not take it out. On the test install, CART kept routing to
+   the deleted pod until the reload in step 4. Health checks only take a pod
+   out once it stops answering (`Worker … marked unhealthy after 3
    consecutive failures`).
-2. **autoconfig writes the new pod IP** into `workers.yaml`.
+2. **autoconfig writes the new worker list** into `workers.yaml`: the new
+   pod's IP is added, and the old pod, no longer a ready endpoint, is dropped.
 3. **The kubelet updates the mounted volume.** On the test install, the reload
    sidecar logged `config changed -> SIGHUP` **65–80 s after the new pod became
    Ready**. Most of that delay is the ConfigMap volume update; the sidecar
@@ -120,7 +116,8 @@ Here is the sequence when an engine pod is replaced:
    (`Eviction task shutting down, clearing the tree (reload)`).
 
 So after every rollout, scale event or engine restart, the prefix cache starts
-cold, and the new pod gets no traffic from CART until step 3 finishes.
+cold. Until the reload, the new pod gets no traffic from CART, and the old pod
+keeps getting all of it. Size the engine's preStop drain to cover that delay.
 [rolling-updates.md](rolling-updates.md) covers what this means for engine
 rollouts.
 
@@ -151,7 +148,9 @@ process memory, so two active replicas would each hold half of the cache.
   connection to `ha.appTcp`, which defaults to `127.0.0.1:8071`. hagate checks
   this every 2 s.
 - **Planned change** (rollout, eviction, `kubectl delete`): the leader gives up
-  the Lease right away, and the standby takes new traffic within 1–2 s. The old
+  the Lease right away. The standby takes the Lease within about a second and
+  labels itself on its next 2 s check, so it takes new traffic within a few
+  seconds. The old
   pod keeps its label while it terminates, so its open streams can finish. On
   the test install, a `rollout restart` of CART under load dropped **0**
   requests.
@@ -180,7 +179,7 @@ per-worker limit, which goes under `modelRoute.cart`.
 | `cart.resources`, `nodeSelector`, `tolerations`, `affinity` | as needed | CART needs CPU only; the default limit is 4 CPU / 16 Gi. Tree memory grows with `max_tree_size` × the number of workers. |
 | `cart.terminationGracePeriodSeconds` | keep it ≥ your longest response | The default is 3600. The Kubernetes default of 30 s cuts long streams. |
 | `cart.service.port` | rarely | If you change it, change three values together: `service.port`, `server.port` in `baseConfig`, and `ha.appTcp`. If `ha.appTcp` still points at the old port, no pod gets the label and the Service has **no endpoints**. |
-| `cart.image.repository`, `cart.ha.image`, `cart.reload.image` | not per model | `models/images.yaml.gotmpl` sets all three from `registry`, so they can't be overridden per model. `ha.image` and `reload.image` are `repository:tag` strings. |
+| `cart.image.repository`, `cart.ha.image`, `cart.reload.image` | not per model (helmfile); yes (plain Helm) | For helmfile `models:` entries, `models/images.yaml.gotmpl` sets all three from `registry`, so a model entry can't override them. With plain `helm install`, set them yourself if the cluster can't reach Docker Hub ([deploy-a-model.md](deploy-a-model.md)). `ha.image` and `reload.image` are `repository:tag` strings. |
 | `cart.configOverlays` | **no** | The `workers.yaml` + `autoconfig: true` entry is what stops `helm upgrade` from overwriting the workers. At most one entry may set `autoconfig: true`, and that entry must not have `content`. |
 | `cart.waitForWorkers`, `cart.reload.enabled`, `cart.ha.enabled` | no | Leave them `true`. Turn all three off only for a standalone CART (see [Standalone](#standalone)). |
 | `cart.reload.process`, `cart.configMapName`, `cart.ulimitNofile` | no | `launch_service` refuses to start if `ulimit -n` is below 65535. |
@@ -341,7 +340,7 @@ Note that the code default endpoint (`/v1/models`) differs from the chart's
 | `proxy.max_backoff_ms` | integer (ms) | `5000` | | Upper limit on the delay, before jitter is applied. | no |
 | `proxy.backoff_multiplier` | float | `2.0` | | Delay = `min(initial × multiplier^attempt, max)`. | no |
 | `proxy.jitter_factor` | float 0–1 | `0.25` | | Multiplies the delay by a random factor between `1 − j` and `1 + j`. | no |
-| `proxy.request_timeout_secs` | integer (s) | `10000` | | Total time allowed for one attempt, including reading the response body. When it runs out, CART returns `504`. Keep it longer than your longest generation. | no |
+| `proxy.request_timeout_secs` | integer (s) | `10000` | | Total time allowed for one attempt, including reading the response body. If it runs out before the response headers arrive, CART returns `504`. If it runs out while a non-streaming body is being read, CART returns `502`. If it runs out partway through a stream, the stream is cut. Keep it longer than your longest generation. | no |
 | `proxy.connect_timeout_secs` | integer (s) | `2` | | Covers only opening the TCP/TLS connection. A dead pod IP fails in about 2 s instead of about 30 s, and long streams are not affected. A failed connect returns `502` and is retried. | no |
 | `proxy.add_routed_peer_header` | bool | `false` | `true` | Adds `x-routed-peer: <worker url>` to responses. This exposes backend pod addresses to whoever receives the response. | no |
 | `proxy.max_body_size` | integer (bytes) | `10485760` | | Maximum request body for `/v1/chat/completions`, `/v1/completions` and `/v1/messages`. Raise it for large inline images. | no |
@@ -358,8 +357,9 @@ Neither setting can be changed.
 | `circuit_breaker.success_threshold` | integer | `2` | Consecutive successes in half-open state before the breaker closes. | no |
 | `circuit_breaker.timeout_secs` | integer (s) | `30` | Time the breaker stays open before it moves to half-open. | no |
 
-Connection errors, timeouts and any 5xx response count as failures. Any 2xx or
-4xx response, **including 429**, counts as a success. In half-open state the
+Any 2xx or 4xx response, **including 429**, counts as a success. Everything
+else counts as a failure: connection errors, timeouts, and any other status,
+including 3xx and 5xx. In half-open state the
 worker gets normal traffic, and a single failure opens the breaker again.
 
 ### `logging`
@@ -368,9 +368,15 @@ worker gets normal traffic, and a single failure opens the breaker again.
 | --- | --- | --- | --- | --- |
 | `logging.level` | string | `info` | A filter such as `info`, `debug` or `cache_aware_router=debug`. The `RUST_LOG` environment variable overrides it. | no |
 
-At `info`, CART logs one line per request: `Route: <reason> → <worker>
-load=<n> | matched=<m>/<total> <ratio> <ms>`. The reason is `cache_hit`,
-`cache_miss`, `hit_overloaded` or `empty_text`.
+At `info`, CART logs one `Route:` line per routing decision, except when only
+one worker is usable (see [How a request is routed](#how-a-request-is-routed)).
+The format depends on the reason:
+
+| Reason | Line |
+| --- | --- |
+| `cache_hit`, `cache_miss` | `Route: <reason> → <worker> load=<n> \| matched=<m>/<total> <ratio> <ms>` |
+| `hit_overloaded` | `Route: hit_overloaded → <least-loaded worker> load=<n> \| <min_load>/<matched_load> <load ratio> <ms>` |
+| `empty_text` | `Route: empty_text → <worker> load=<n> \| <ms>` |
 
 ### Validation
 
@@ -422,7 +428,10 @@ cache-aware-router -c config.yaml -c overlay.yaml --config-check
 
 1. **Usable workers.** Keep the workers that are healthy, have a circuit
    breaker that isn't open, and are below `max_load`. If none are left, return
-   `503`.
+   `503`. **If exactly one is left, send the request to it.** CART skips the
+   remaining steps, so it does no prefix match and logs no `Route:` line. This
+   applies to a model with one engine replica (the chart default), and to a
+   retry in a two-replica pool.
 2. **Least-loaded worker.** Find the lowest `load + load_penalty`. Ties are
    broken at random.
 3. **Empty text.** If there is no text to match (a path CART doesn't match on,
@@ -494,8 +503,11 @@ kubectl -n $NS port-forward svc/$REL-cart 8071:8071 &
 curl -s localhost:8071/health
 curl -s localhost:8071/workers
 
-# send the same long prompt twice: cache_miss first, then cache_hit on the same worker
-kubectl -n $NS logs deploy/$REL-cart -c cart --tail=20 | grep 'Route:'
+# send the same long prompt twice: cache_miss first, then cache_hit on the same worker.
+# Needs 2+ engine replicas (with one, CART logs no Route: lines), and must read
+# the leader: `logs deploy/...` may pick the standby, which gets no traffic.
+LEADER=$(kubectl -n $NS get pods -l app.kubernetes.io/name=cart,cart-active=true -o name)
+kubectl -n $NS logs $LEADER -c cart --tail=20 | grep 'Route:'
 
 # after an engine pod changes: did the reload arrive, and was it accepted?
 kubectl -n $NS logs deploy/$REL-cart -c reload --tail=5

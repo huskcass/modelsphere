@@ -1,9 +1,7 @@
 # Autoscaling inference engines
 
 This page covers how ModelSphere changes the number of engine replicas: what
-it reads, what it writes, every setting, and how to switch it off. The index of
-all configuration pages is [`configuration.md`](configuration.md). Deploying a
-model in the first place is [`deploy-a-model.md`](deploy-a-model.md).
+it reads, what it writes, every setting, and how to switch it off.
 
 Scaling is horizontal. A replica is either one pod of a Deployment or one group
 of a LeaderWorkerSet (a multi-node model). Two components take part, and the
@@ -140,9 +138,10 @@ the workload entirely**, so that the operator owns the field.
   When every source is ignored, the operator keeps the current
   `spec.replicas`. It still clamps that value to
   `[minReplicas, maxReplicas]`.
-- **Scale-up is immediate.** It is bounded by `maxReplicas`. It is also
-  computed from *ready* replicas, so pods that are still starting do not
-  compound.
+- **Scale-up is immediate.** It is bounded by `maxReplicas`. Under
+  `Prometheus` it is also computed from *ready* replicas, so pods that are
+  still starting do not compound. Under `Custom` the decision is an absolute
+  count and ready replicas play no part.
 - **Scale-down is damped** in three ways:
   - `scaleDown.stabilizationWindowSeconds` holds the fleet at the highest
     recommendation seen in the window.
@@ -203,7 +202,7 @@ Namespaced, with a `status` subresource. `kubectl get llmscalers` shows
 | `maxReplicas` | — | required, ≥ 1 | Ceiling |
 | `metrics[].name` | — | | Label used in logs |
 | `metrics[].query` | — | required | PromQL returning **exactly one** series; aggregate it with `avg(...)` |
-| `metrics[].target` | — | required; finite, > 0; a `%` suffix is rejected | Per-replica target on the query's own scale: `"0.8"` for a 0–1 ratio, `"80"` for 0–100 |
+| `metrics[].target` | — | required (any string) | Per-replica target on the query's own scale: `"0.8"` for a 0–1 ratio, `"80"` for 0–100. Must be a finite number > 0 with no `%` suffix; this is checked at sync time, not by the API server, so a bad value such as `"80%"` is accepted, logged as an error, and that metric is skipped on every sync |
 | `metrics` | — | non-empty unless `Custom` | Ignored under `Custom` |
 | `syncPeriodSeconds` | `15` | | Seconds between evaluations |
 | `retryPeriodSeconds` | `10` | | Retry interval while the target cannot be read |
@@ -230,7 +229,7 @@ About the reply:
 
 | Field | Meaning |
 | --- | --- |
-| `currentReplicas` | Ready replicas of the target at the last sync |
+| `currentReplicas` | Ready replicas of the target at the last sync. While none are ready it shows `spec.replicas` instead |
 | `desiredReplicas` | The recommendation after clamping and stabilization, **before** the `maxStepReplicas` cap. It shows where a step-capped descent is heading |
 | `conditions` | Declared, not populated |
 
@@ -373,11 +372,13 @@ Each tick starts with a check. **A service is skipped** if any of these hold:
 - it names two or more GPU pools;
 - its ready-replica count is missing or 0.
 
-A skipped service keeps its last decision. A service without
-`maximumDeployment` is never seeded, so it does not appear in `/decisions` at
-all. The first
-time decision-gen sees a service, it seeds the service from the workload's
-`spec.replicas`, clamped to the CR's `[min, max]`.
+A skipped service keeps its last decision on `/decisions`. That includes a
+service whose `maximumDeployment` is removed after it was managed: it stays
+frozen at its last decision until `maximumDeployment` returns or the CR is
+deleted. A service that never had `maximumDeployment` is never seeded, so it
+does not appear in `/decisions` at all. The first time decision-gen sees a
+service, it seeds the service from the workload's `spec.replicas`, clamped to
+the CR's `[min, max]`.
 
 If any declared TTFT/OTPS series is missing, or a job's queue series is
 missing, the service holds. A quantile that is NaN because there was no traffic
@@ -468,7 +469,7 @@ interval and no dry-run mode.
 | `manager.resources` | requests 10m / 64Mi; limits 500m / 128Mi | |
 | `manager.terminationGracePeriodSeconds` | `10` | |
 | `manager.affinity`, `nodeSelector`, `tolerations`, `podSecurityContext`, `securityContext` | non-root, read-only root FS | |
-| `rbac.namespaced` | `false` | `true`: Role/RoleBinding, acting in the release namespace only |
+| `rbac.namespaced` | `false` | `true` renders a Role/RoleBinding in the release namespace instead of cluster-wide RBAC. **Not usable with the current controller**: it still watches all namespaces, so its watches are refused, and it could only ever scale workloads in its own namespace. Leave it `false` |
 | `rbac.helpers.enabled` | `false` | Admin/editor/viewer ClusterRoles for `LLMScaler` |
 | `crd.enabled` / `crd.keep` | `true` / `true` | Install the CRD; keep it on uninstall |
 | `metrics.enabled` / `port` / `secure` | `true` / `8443` / `true` | The operator's own `/metrics` |
@@ -583,7 +584,8 @@ With the default decision-gen settings:
   5 min), 15 % more replicas are added, at least one. This happens at most
   once every 15 min.
 - **Scale-up on 429s.** A 429 rate ≥ 5 % (≥ 5 rejections in 2 min) grows the
-  fleet by up to 1.2× straight away, or up to 1.5× if an SLO is also missed.
+  fleet by up to 1.2× straight away, or up to 1.5× if an SLO is also missed,
+  and always by at least one replica (so a 1-replica fleet doubles).
 - **Scale-down.** 15 % of replicas are removed only when all of these hold:
   - p80 TTFT has stayed below 1 s **and** p80 OTPS above 40 tok/s for 20
     unbroken minutes;
@@ -623,8 +625,9 @@ What the decision-gen log tells you:
 | `hold-cooldown-up`, `hold-cooldown-down`, `hold-comfort` | A gate has not opened yet |
 | `freeze-ramp-up`, `freeze-in-drain` | The last change has not finished landing |
 
-On the operator side, `no decision for serviceId` means decision-gen is not
-managing that service.
+On the operator side, `no decision for serviceId` means decision-gen has no
+decision for that service: it never had `maximumDeployment`, its CR was
+deleted, or it was never seeded (for example, no matching GPU workload).
 
 ### Pause or turn it off
 
@@ -634,7 +637,7 @@ Use one of these instead:
 | To | Do | Effect |
 | --- | --- | --- |
 | Pin one model at N | `scaler.minReplicas` = `scaler.maxReplicas` = N, or `kubectl patch llmscaler <name> -n <ns> --type merge -p '{"spec":{"minReplicas":N,"maxReplicas":N}}'` | Every result clamps to N. Works for both providers; undo by restoring the bounds |
-| Stop SLO scaling for one model | Remove `maximumDeployment` from its `LLMSLORequirement` | decision-gen drops the service; the operator finds no decision and holds, clamped to its own bounds |
+| Stop SLO scaling for one model | Remove `maximumDeployment` from its `LLMSLORequirement` | decision-gen stops updating the service but keeps publishing its **last** decision, so the operator keeps applying that count (clamped to its own bounds). Put `maximumDeployment` back to resume |
 | Stop scaling one model | `scaler.enabled: false`, with `replicaCount` set to the **current** count | The chart puts `spec.replicas: replicaCount` back on the workload, so any other value resizes the fleet on upgrade |
 | Freeze all models | `kubectl -n llmscaleoperator-system scale deploy -l control-plane=controller-manager --replicas=0` | Nothing writes `spec.replicas`; hand edits stick. On restart the operator applies current recommendations at once |
 | Take decision-gen away | Disable the `llm-slo` release | `Custom` scalers fail their fetch and hold (clamped); `Prometheus` scalers are unaffected |

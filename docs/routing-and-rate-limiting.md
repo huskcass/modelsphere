@@ -2,11 +2,7 @@
 
 This is the reference for the routing layer (llm-openresty). It covers how a
 model gets a route, what decides whether a request is admitted, and which values
-change that. [`configuration.md`](configuration.md) is the index of these
-references. For the model side, see [`deploy-a-model.md`](deploy-a-model.md);
-for the cache-aware router in front of the engines, see [`cart.md`](cart.md);
-for scaling, see [`autoscaling.md`](autoscaling.md); for draining and rollouts,
-see [`rolling-updates.md`](rolling-updates.md).
+change that.
 
 Versions described: openresty chart `0.1.20`, autoconfig `0.4.0`, and the
 `sglang` / `vllm` charts pinned in `environments/default.yaml`.
@@ -175,8 +171,9 @@ one that rejects ends the request.
 | 6 | Decode-rate average at or under its threshold (**only when adaptive concurrency is off**) | `429 "tps limit exceeded"` |
 | 7 | Pick a peer and proxy, retrying on failure | upstream status |
 
-`GET /v1/models` and `/health` skip checks 4–6, so health probes from an outer
-layer are never rate-limited.
+`GET /v1/models` skips checks 2 and 4–6, so health probes from an outer layer
+are never rate-limited. A route serves only `/v1/...` and its `/_*` endpoints;
+`/<route>/health` returns `404`.
 
 ## Concurrency
 
@@ -230,8 +227,11 @@ While it is on:
 | `adaptive_cc_abs` | `5` | Minimum headroom in slots. |
 | `adaptive_cc_use_ttft` | on | `"false"` stops high TTFT from shrinking the limit. |
 
-**When it first applies, a route drops to about 40 % of its static limit and
-climbs 2 % every 20 s.** Reaching full capacity takes around 15 minutes. A
+**When it first applies, a route drops to about 40 % of its static limit, and
+it climbs only under demand.** It grows 2 % every 20 s while in-flight requests
+reach 90 % of the limit or concurrency 429s occur; otherwise it stays close to
+real concurrency, so a lightly loaded route sits at the floor. From the floor,
+reaching the static limit takes about 15 minutes of sustained pressure. A
 threshold above what the backend can deliver keeps the limit at the floor, and
 nothing alerts on it. Watch `/_tps_status`.
 
@@ -439,9 +439,11 @@ callers should not see your internal addresses.
 
 ## Observing the routing layer
 
-Every endpoint below is per route (`/<route>/...`). The read-only ones have
-**no authentication and no IP restriction**, so anyone who can reach 8080 can
-read them. Restrict `/<route>/_*` at the Gateway if 8080 is exposed.
+Every endpoint below is per route (`/<route>/...`). Except `/_bodylog_status`,
+they have **no authentication and no IP restriction**, so anyone who can reach
+8080 can read them. Restrict `/<route>/_*` at the Gateway if 8080 is exposed.
+`/_bodylog_status` accepts only 127.0.0.1; query it from inside the active pod,
+as in [Changing limits at runtime](#changing-limits-at-runtime).
 
 | Endpoint | Shows |
 | --- | --- |
@@ -451,7 +453,7 @@ read them. Restrict `/<route>/_*` at the Gateway if 8080 is exposed.
 | `/_ttft_status` | TTFT average, `enforcing`, `ttft_429_enabled`, the metric sources. |
 | `/_429_status` | 429 counts by route and reason: `concurrency`, `ttft`, `tps`, `rule`. |
 | `/_route_debug?sid=`, `POST /_route_inspect` | Which peer a session or request would go to, without sending it. |
-| `/_bodylog_status` | Whether body capture is on, and its write / drop counters. |
+| `/_bodylog_status` | Whether body capture is on, and its write / drop counters. 127.0.0.1 only. |
 
 `tps_limit_source` says where the decode-rate threshold comes from:
 
@@ -513,8 +515,8 @@ openresty ships request and response bodies to the bodylog listener at
 search domains, so a shorter name never resolves. When it does not resolve:
 
 - frames are dropped with no error on the request path;
-- `/<route>/_bodylog_status` still shows `enabled=true` and a growing
-  `write_count`.
+- `/<route>/_bodylog_status` (from inside the pod) still shows `enabled=true`
+  and a growing `write_count`.
 
 **Known issue:** `llmgateway/openresty.yaml.gotmpl` sets
 `host: bodylog.llm-route.svc`. On a test install, openresty reported thousands
