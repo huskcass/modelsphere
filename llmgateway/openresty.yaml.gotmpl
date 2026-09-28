@@ -1,5 +1,12 @@
 bodylog:
-  host: bodylog.llm-route.svc
+  # Fully qualified, and not by preference: nginx's resolver does NOT apply the
+  # search domains from /etc/resolv.conf, so a short Service name never resolves
+  # in the cosocket that ships the frames -- and that failure is silent. The
+  # logger reports frames written and none dropped, openresty logs no error, and
+  # bodylog simply receives nothing. Measured on a test cluster: with
+  # `bodylog.llm-route.svc` not one request was recorded; with the name below,
+  # the first request landed in /data/bodylog/<date>/<hour>.jsonl.
+  host: bodylog.{{ .Values.namespaces.llmRoute }}.svc.cluster.local
 fullnameOverride: openresty
 image:
   repository: {{ .Values.registry }}/llm-openresty
