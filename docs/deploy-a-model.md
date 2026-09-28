@@ -109,21 +109,49 @@ The charts reject unknown keys, so a typo fails the install.
 
 ## vLLM
 
-Same shape, with these differences:
-
-- Single node only.
-- Shutdown: set `terminationGracePeriodSeconds: 3600` and
-  `lifecycle.preStop.drainSeconds: 600`, `pollIntervalSeconds: 5`. vLLM has
-  no `forceShutdown`, `preStopKill` or `shutdownReserveSeconds`.
+The same model on the vllm chart (single node only):
 
 ```yaml
+image:
+  repository: vllm/vllm-openai
+  tag: v0.30.0-cu129-ubuntu2404       # pin a tag; the default floats
 model:
-  gpus: "2"
+  name: "Qwen/Qwen2.5-72B-Instruct"   # what clients send as "model"
+  localPath: "/mnt/disk0/models/Qwen/Qwen2.5-72B-Instruct"
+  gpus: "8"                           # per pod
+modelCheck:
+  requiredGlobs: ["config.json", "*.safetensors"]
 extraArgs:
-  - --tensor-parallel-size=2
+  - --tensor-parallel-size=8
+  - --gpu-memory-utilization=0.85
+startupProbe:
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 180               # x 30 s = 90 minutes to load
+progressDeadlineSeconds: 7200
+terminationGracePeriodSeconds: 3600
+lifecycle:
+  preStop:
+    drainSeconds: 600
+    pollIntervalSeconds: 5
+volumes:
+  - name: shm
+    emptyDir: { medium: Memory, sizeLimit: 32Gi }
+volumeMounts:
+  - name: shm
+    mountPath: /dev/shm
+nodeSelector:
+  nvidia.com/gpu.product: NVIDIA-H100-80GB-HBM3
+tolerations:
+  - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+modelRoute:
+  nginx:
+    outputConfigMap: "llm-route/openresty-conf"   # required
+  monitor:
+    enabled: false
 ```
 
-## Several nodes (sglang only)
+## Multi-nodes service (sglang only)
 
 Add a LeaderWorkerSet. `model.gpus` stays per pod; `--tp-size` covers the
 whole group. Do not pass `--nnodes`, `--node-rank` or `--dist-init-addr`: the
