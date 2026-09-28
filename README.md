@@ -4,6 +4,7 @@
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/License-Apache%202.0-blue.svg"></a>
   <a href="https://github.com/modelsphere"><img alt="Repositories" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Forgs%2Fmodelsphere&query=%24.public_repos&label=open%20source&suffix=%20repositories&color=blue"></a>
   <a href="docs/install.md"><img alt="Docs" src="https://img.shields.io/badge/docs-install%20guide-blue"></a>
+  <a href="docs/configuration.md"><img alt="Configuration" src="https://img.shields.io/badge/docs-configuration-blue"></a>
 </p>
 
 An LLM inference stack for Kubernetes, and the deployment repository that
@@ -95,6 +96,9 @@ curl http://127.0.0.1:8080/qwen/v1/chat/completions \
 Exposing that outside the cluster is a Gateway, an Ingress or a Service of your
 choosing -- [the walkthrough](docs/install.md#7-gateway-objects) ships Gateway
 API objects for it.
+
+Once it runs, [`docs/configuration.md`](docs/configuration.md) covers deploying
+more models, rate limits, autoscaling and upgrades.
 
 ## Documentation
 
