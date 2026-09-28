@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 450" width="900" height="450" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#57606a"/></marker>
+    <marker id="ad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8250df"/></marker>
+    <style>
+      .n   { font-size: 13px; fill: #1f2328; }
+      .cap { font-size: 12px; fill: #57606a; }
+      .lbl { font-size: 11px; fill: #57606a; }
+      .box { fill: #fff; stroke: #d0d7de; stroke-width: 1.4; rx: 6; }
+      .flow{ stroke: #57606a; stroke-width: 1.4; fill: none; marker-end: url(#a); }
+      .ctl { stroke: #8250df; stroke-width: 1.3; fill: none; stroke-dasharray: 5 4; marker-end: url(#ad); }
+    </style>
+  </defs>
+  <rect width="900" height="450" fill="#ffffff"/>
+  <rect x="132" y="40" width="224" height="214" rx="10" fill="#f6f8fa" stroke="#d8dee4" stroke-dasharray="4 4"/>
+  <text class="cap" x="244.0" y="274" text-anchor="middle">Routing</text>
+  <rect x="420" y="40" width="452" height="214" rx="10" fill="#f6f8fa" stroke="#d8dee4" stroke-dasharray="4 4"/>
+  <text class="cap" x="646.0" y="274" text-anchor="middle">Serving</text>
+  <rect x="132" y="306" width="224" height="82" rx="10" fill="#f6f8fa" stroke="#d8dee4" stroke-dasharray="4 4"/>
+  <text class="cap" x="244.0" y="408" text-anchor="middle">Observability</text>
+  <rect x="420" y="306" width="452" height="82" rx="10" fill="#f6f8fa" stroke="#d8dee4" stroke-dasharray="4 4"/>
+  <text class="cap" x="646.0" y="408" text-anchor="middle">Scaling and health</text>
+  <rect x="440" y="74" width="200" height="140" rx="8" fill="#ffffff" stroke="#e1e4e8" stroke-dasharray="4 4"/>
+  <text class="cap" x="540.0" y="202" text-anchor="middle">engine pod</text>
+  <rect x="660" y="74" width="200" height="140" rx="8" fill="#ffffff" stroke="#e1e4e8" stroke-dasharray="4 4"/>
+  <text class="cap" x="760.0" y="202" text-anchor="middle">engine pod</text>
+  <rect class="box" x="152" y="74" width="184" height="40"/>
+  <text class="n" x="244.0" y="98.5" text-anchor="middle">llm-openresty</text>
+  <rect class="box" x="152" y="134" width="184" height="40"/>
+  <text class="n" x="244.0" y="158.5" text-anchor="middle">cache_aware_router</text>
+  <rect class="box" x="152" y="194" width="184" height="40" stroke="#8250df"/>
+  <text class="n" x="244.0" y="218.5" text-anchor="middle" fill="#8250df">autoconfig</text>
+  <rect class="box" x="458" y="98" width="164" height="38"/>
+  <text class="n" x="540.0" y="121.5" text-anchor="middle">sglang</text>
+  <rect class="box" x="458" y="150" width="164" height="38"/>
+  <text class="n" x="540.0" y="173.5" text-anchor="middle">hang-watcher</text>
+  <rect class="box" x="678" y="98" width="164" height="38"/>
+  <text class="n" x="760.0" y="121.5" text-anchor="middle">vllm</text>
+  <rect class="box" x="678" y="150" width="164" height="38"/>
+  <text class="n" x="760.0" y="173.5" text-anchor="middle">hang-watcher</text>
+  <rect class="box" x="152" y="324" width="184" height="26"/>
+  <text class="n" x="244.0" y="341.5" text-anchor="middle">bodylog</text>
+  <rect class="box" x="152" y="356" width="184" height="26"/>
+  <text class="n" x="244.0" y="373.5" text-anchor="middle">bodylog-exporter</text>
+  <rect class="box" x="440" y="334" width="200" height="26"/>
+  <text class="n" x="540.0" y="351.5" text-anchor="middle">llm-operator</text>
+  <rect class="box" x="660" y="334" width="200" height="26"/>
+  <text class="n" x="760.0" y="351.5" text-anchor="middle">slo-scaler-decision-gen</text>
+  <circle cx="46" cy="126" r="11" fill="none" stroke="#57606a" stroke-width="1.4"/>
+  <path d="M28,162 C28,142 64,142 64,162" fill="none" stroke="#57606a" stroke-width="1.4"/>
+  <text class="cap" x="46" y="182" text-anchor="middle">client</text>
+  <path class="flow" d="M71,146 C109.0,146 109.0,94.0 147,94.0"/>
+  <path class="flow" d="M244.0,119 L244.0,129"/>
+  <path class="flow" d="M341,154.0 C388.0,154.0 388.0,144.0 435,144.0"/>
+  <text class="lbl" x="388" y="136" text-anchor="middle">requests</text>
+  <path class="flow" d="M163.36,259 L163.36,301"/>
+  <text class="lbl" x="114" y="284" text-anchor="middle">records</text>
+  <path class="flow" d="M361,347.0 L415,347.0"/>
+  <text class="lbl" x="388" y="340" text-anchor="middle">metrics</text>
+  <path class="ctl" d="M808.72,301 L808.72,259"/>
+  <text class="lbl" x="836" y="284" text-anchor="middle">replicas</text>
+  <path class="ctl" d="M415,172.68 C378.0,172.68 378.0,214.0 341,214.0"/>
+  <path d="M20,432 L52,432" stroke="#57606a" stroke-width="1.4" marker-end="url(#a)"/>
+  <text class="lbl" x="58" y="436">requests, records</text>
+  <path d="M170,432 L202,432" stroke="#8250df" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ad)"/>
+  <text class="lbl" x="208" y="436">control</text>
+  <text class="lbl" x="880" y="436" text-anchor="end">every box is a repository under github.com/modelsphere</text>
+</svg>
