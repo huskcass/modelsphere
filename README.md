@@ -101,6 +101,12 @@ API objects for it.
 | Document | What is in it |
 |---|---|
 | [`docs/install.md`](docs/install.md) | the complete install: preparing the machines, creating the Kubernetes cluster, and installing the stack on it -- with the air-gapped path and the detail on each step linked from there |
+| [`docs/configuration.md`](docs/configuration.md) | what to configure once it runs, and the entry point to the five guides below |
+| [`docs/deploy-a-model.md`](docs/deploy-a-model.md) | engines, topologies, every value you are expected to set, removal, troubleshooting |
+| [`docs/routing-and-rate-limiting.md`](docs/routing-and-rate-limiting.md) | how a route comes to exist, concurrency and token-rate limits, SLO-declared limits, API keys, health checks |
+| [`docs/cart.md`](docs/cart.md) | every parameter of the cache-aware router, and which reload without a restart |
+| [`docs/autoscaling.md`](docs/autoscaling.md) | replica decisions: LLMScaler, SLO requirements, decision-gen, and how to pause it |
+| [`docs/rolling-updates.md`](docs/rolling-updates.md) | updating each component without dropping requests, with measured results |
 
 ## Contributing
 
