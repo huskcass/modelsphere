@@ -56,28 +56,18 @@ The pairs it must list are in Cilium's own `pkg/datapath/linux/requirements.go`.
 
 ## 1. Prep the node
 
-The same Ansible play every other node goes through — `setup_k8s.yaml` — with
-the install method switched over. There is no separate script for this: node
-prep had one implementation already, and a second one in bash would have drifted
-from it the first time someone fixed a containerd setting in only one place.
+The same Ansible play every other node goes through -- `setup_k8s.yaml` -- with
+the install method switched over.
 
-Ansible needs a Python on the target that ansible-core supports — 3.8 or newer
-for ansible-core 2.18. This is where a vendor OS bites: Kylin V10 ships 3.7.9 and
-its repo has nothing newer, while CANN and `npu-smi` are built against that very
-interpreter, so replacing it is out of the question. Install a self-contained one
-next to it and point Ansible at that; nothing else on the host sees it.
+It needs **Python 3.8+ on the target** (ansible-core 2.18). A vendor OS may ship
+less: Kylin V10 has 3.7.9 with nothing newer in its repo, and replacing it is
+not an option because CANN and `npu-smi` are built against it. Install a
+self-contained interpreter beside it and point Ansible at that with
+`ansible_python_interpreter` -- [python-build-standalone][pbs] unpacked into
+`/opt/ansible-python` does it, and deleting that directory reverts it. Ubuntu
+nodes need none of this.
 
-```bash
-# on the node, once -- chicken-and-egg: ansible cannot install what it needs to run
-VER=3.11.16 TAG=20260901
-curl -fsSL \
-  "https://github.com/astral-sh/python-build-standalone/releases/download/$TAG/cpython-$VER+$TAG-aarch64-unknown-linux-gnu-install_only.tar.gz" \
-  | tar -xz -C /opt/ansible-python --strip-components=1   # mkdir -p it first
-/opt/ansible-python/bin/python3 -V
-```
-
-Removing `/opt/ansible-python` reverts it completely. An Ubuntu node needs none
-of this; its system python is already new enough.
+[pbs]: https://github.com/astral-sh/python-build-standalone/releases
 
 Put the node in an inventory. [`inventory-ascend.ini.example`](../inventory-ascend.ini.example)
 is the shape, with every variable that differs from an Ubuntu node and why it is
