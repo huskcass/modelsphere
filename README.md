@@ -91,8 +91,7 @@ environment before you apply it.
 The model is served through the routing layer, at
 `http://openresty.llm-route.svc:8080/<release>/v1/chat/completions` -- the
 release name from step 2 is the path prefix (`qwen` above), and it is how the
-router picks the model, so a request to plain `/v1/chat/completions` comes back
-502 from openresty with every component healthy.
+router picks the model.
 
 ```bash
 kubectl -n llm-route port-forward svc/openresty 8080:8080 &
