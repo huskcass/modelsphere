@@ -99,13 +99,15 @@ What the `binary` path does differently, and nothing else does:
 - `k8s_accel_runtime=ascend` registers `ascend-docker-runtime` as a runc.v2
   runtime and makes it `default_runtime_name`.
 
-Everything else — swap, modules, sysctl, `/etc/hosts`, `SystemdCgroup`, the 20m
-pull timeout, `certs.d` — is the shared path, unchanged from the Ubuntu nodes.
+Everything else -- swap, modules, sysctl, `/etc/hosts`, `SystemdCgroup`, the
+image-pull timeout, `certs.d` -- is the shared path, the same as on an Ubuntu
+node.
 
-> The containerd config is regenerated from `containerd config default` on every
-> run, which is deliberate here: Ascend's installer had pointed runc at the
-> removed v1 shim (`io.containerd.runtime.v1.linux`), which containerd 2.x will
-> not start with. Patching the vendor's file would have kept that.
+⚠️ **containerd's config is regenerated from `containerd config default` on
+every run**, so anything the vendor's installer put in `/etc/containerd/config.toml`
+is gone afterwards. That is deliberate -- Ascend's installer pointed runc at the
+v1 shim containerd 2.x removed, which would have survived a patch-in-place --
+but if you have your own settings there, put them in the playbook, not the file.
 
 ## 2. Join
 
