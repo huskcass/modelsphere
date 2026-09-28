@@ -116,16 +116,19 @@ needs kubelet overrides, and they have to be in place *during* the join. Get a
 token on the control plane (`kubeadm token create --ttl 1h --print-join-command`),
 then on the node:
 
-```bash
-mkdir -p /etc/kubernetes/join-patches
-cat > /etc/kubernetes/join-patches/kubeletconfiguration+strategic.yaml <<'EOF'
+`/etc/kubernetes/join-patches/kubeletconfiguration+strategic.yaml` -- the
+filename is kubeadm's convention, `<component><+strategic|+merge|+json>.yaml`:
+
+```yaml
 apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration
 failCgroupV1: false                 # only on a cgroup v1 host
 resolvConf: /etc/resolv.conf        # only without systemd-resolved
-EOF
+```
 
-cat > /etc/kubernetes/join.yaml <<EOF
+`/etc/kubernetes/join.yaml`:
+
+```yaml
 apiVersion: kubeadm.k8s.io/v1beta4
 kind: JoinConfiguration
 discovery:
@@ -145,8 +148,11 @@ nodeRegistration:
     - SystemVerification
 patches:
   directory: /etc/kubernetes/join-patches
-EOF
+```
 
+Then, on the node:
+
+```bash
 kubeadm join --config /etc/kubernetes/join.yaml && rm -f /etc/kubernetes/join.yaml
 ```
 
