@@ -8,8 +8,10 @@
 # describe the cluster.
 #
 # Prerequisites
-#   - the gpu-operator release from README step 6, so the node advertises
-#     nvidia.com/gpu
+#   - the node advertises nvidia.com/gpu. Either the cluster's own device
+#     plugin does that (environments/private.yaml.example assumes so and leaves
+#     `gpuOperator` off), or you turn that release on. Without it the pod stays
+#     Pending: `kubectl get node <node> -o jsonpath='{.status.allocatable}'`
 #   - the weights already on that node, under model.localPath
 #
 # Install:
