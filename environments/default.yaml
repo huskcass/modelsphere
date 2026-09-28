@@ -127,8 +127,8 @@ versions:
   # governs that the way it does for everything else. The bundle pulls both, in
   # case a site declares a model after the bundle is built -- which it will,
   # since that is the point of building one bundle for any cluster.
-  sglang: "0.8.0"
-  vllm: "0.5.0"
+  sglang: "0.8.1"
+  vllm: "0.6.1"
 
   llmOperator: "0.3.0"
   llmslo: "0.2.0"
