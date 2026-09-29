@@ -1,0 +1,126 @@
+# LVM(h3 视频生成服务,minimax-h3)的业务告警规则,与 llm-serving.yaml(LLM 文本
+# 服务)平级。指标口径的权威参考:dashboards/build_dash.py 的 H3 部分(与
+# h3-dashboard.json 同源)。
+#
+# 三个告警(全部 warning / channel: infra:只经 alert-webhook 进 infra 群,
+# 不触发语音电话 —— critical 才会):
+#   H3QueueFailuresHigh     10 分钟内失败任务数 > 2(按 capability 拆)
+#   H3QueueOldestTaskStuck  最老任务年龄 > 1 小时(queued / running 分开报)
+#   H3GPUMemUsageHigh       h3 占用的 GPU 卡显存占用率 > 90%
+# 前两条阈值与 h3 服务侧 2026-09-29 对齐(失败 >2/10m、最老 >1h),非从 monitor 迁移。
+#
+# ⚠️ metadata.labels 必须带 release: kube-prometheus-stack ——
+#    本集群 Prometheus 的 ruleSelector 就是 matchLabels{release: kube-prometheus-stack},
+#    缺了这个 label 的 PrometheusRule 会被【静默忽略】:kubectl get 看得到,但 Prometheus 不加载。
+#    验证方式:apply 后去 Prometheus 的 /rules 页面确认规则出现,别只看 kubectl。
+#
+# severity 决定通知渠道(见 overrides.yaml 的 alertmanager.route):
+#   critical → receiver phone   warning/info → receiver all
+# channel 决定进哪个 IM 群:alert-webhook 按这个 label 分流。h3 的值守在 infra 侧,
+# 本文件统一 channel: infra。
+#   ⚠️ 新增规则记得带上 channel:漏了不报错,只会落到 webhook 的兜底路由进大群。
+#
+# ── h3 队列指标的两个口径(来自 build_dash.py 的 H3 注释,写规则前必须知道)──
+#   ① 集群维度:h3_queue_tasks / oldest_*_age 等每个副本都从共享 PostgreSQL 读同一份
+#      值、各报一次 → 聚合必须 max() 去重,裸 sum() 会按副本数(当前 4)成倍放大。
+#      本文件的聚合全部是 max by(...),没有裸 sum。
+#   ② h3_queue_tasks 是【累计计数器】(per capability+status 的库里任务总数,
+#      24h 实测单调、零回退)→ "近 10 分钟新增数" = 当前值 − 10 分钟前的值。
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: lvm-serving-rules
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    # ---------------- h3 队列(数据源:h3 exporter → 共享 PostgreSQL)----------------
+    - name: lvm-serving.rules
+      interval: 30s
+      rules:
+        # 10 分钟内失败任务数 > 2。
+        # 按 capability 拆(fl2va / ref2va):告警点名是哪类视频在失败。全局 sum() 的
+        # 写法会把 capability 标签整个丢掉,告警里只剩一个数字、分不清谁在失败,弃用;
+        # 代价是单类要攒够 3 个失败才触发(全局合计的写法两类合起来够 3 个就报)。
+        # 窗口用 offset 差值而非 rate()/increase():h3_queue_tasks 是 gauge 型的累计计数
+        # (名字不带 _total),我们要的是窗口内的【个数】,差值本身就是,不除窗口长度。
+        #
+        # 已知盲区(increase()+subquery 写法同样躲不掉,不值得为它加复杂度):
+        #   ① 某 capability 的 failed series 刚出现(此前从未失败过、series 不满 10m)
+        #      时 offset 10m 取不到值 → 首批失败漏报。一次性问题,series 老化后自愈;
+        #      而且从未失败过的 capability 本来也凑不出"失败告警"。
+        #   ② exporter 重启计数器归零 → 差值为负、不误报,但重启前后 10m 内的失败会漏。
+        # for=2m:差值一旦过 2,会保持到失败滑出 10m 窗口(≥10 分钟),2m 只挡单次
+        # 抓取毛刺,不会漏突发。
+        - alert: H3QueueFailuresHigh
+          expr: |
+            max by (capability) (h3_queue_tasks{status="failed"})
+              - max by (capability) (h3_queue_tasks{status="failed"} offset 10m) > 2
+          for: 2m
+          labels:
+            severity: warning
+            channel: infra
+          annotations:
+            summary: "h3 {{ $labels.capability }} 10 分钟内新增 {{ $value | printf \"%.0f\" }} 个失败任务"
+            description: "近 10 分钟该 capability 失败任务超过 2 个。h3_queue_tasks 为累计计数器,本告警取当前值与 10 分钟前的差;若该 capability 此前从未失败过(series 不满 10 分钟),首批失败会被漏报,属一次性盲区。"
+
+        # 最老任务年龄 > 1 小时。queued(排队中)/ running(运行中)分开报:两种积压的
+        # 处理动作不同 —— queued 老 = 队列消化不动(后端不够/挂了),running 老 =
+        # 单任务卡死(视频生成时长失控 / SGLang hang)。
+        # label_replace(..., "", "") 是打常量标签的惯用法:给两个指标分别打上
+        # kind=queued / running 再 or 合并,后面 max by (kind) 跨副本去重(文件头口径①)。
+        # for=5m:卡住的任务年龄只增不减,不存在抖动,5m 只挡单次抓取毛刺;任务完成
+        # 或被清理时告警自动 resolved,语义正确。
+        - alert: H3QueueOldestTaskStuck
+          expr: |
+            max by (kind) (
+                label_replace(h3_queue_oldest_queued_age_seconds,  "kind", "queued",  "", "")
+              or
+                label_replace(h3_queue_oldest_running_age_seconds, "kind", "running", "", "")
+            ) > 3600
+          for: 5m
+          labels:
+            severity: warning
+            channel: infra
+          annotations:
+            summary: "h3 最老 {{ $labels.kind }} 任务已 {{ $value | humanizeDuration }}"
+            description: "最老 {{ $labels.kind }} 任务(queued=排队中 / running=运行中)年龄超过 1 小时。排队老说明队列消化不动,运行中老说明单任务卡死,先看 SGLang 后端状态。"
+
+    # ---------------- h3 占用的 GPU(数据源:DCGM)----------------
+    # 为什么只报 h3 的卡、不做全集群规则:LLM 推理的卡显存常年 >90%(KV cache 按
+    # mem_fraction_static 预分配,稳态即高位),全集群 ">90%" 的规则会常亮、失去信号
+    # 价值 —— 这是收窄到 exported_namespace="minimax-h3" 的原因。与 llm-serving.yaml
+    # 的 llm-gpu.rules 分工:那边管温度/热降频这类与占用方无关的硬件健康,这边管
+    # h3 专属的显存水位。
+    # 注意 h3 后端同样是 SGLang、同样预分配:若 h3 的 mem_fraction_static 配得比 0.9
+    # 高,本规则一样会常亮 —— 阈值就是 expr 里唯一的常量 0.90,吵了直接改。
+    - name: lvm-gpu.rules
+      interval: 30s
+      rules:
+        # h3 占用的任意卡显存占用率 > 90%。
+        #   · 口径:exported_namespace="minimax-h3" = 当前被 minimax-h3 的 pod 分配走
+        #     的卡(dcgm-exporter 的 k8s pod 映射,GPU 硬件监控面板"已用卡"同款)。
+        #     预检实测(2026-09-29):h3-minimax-h3-server-fl2va-* / ref2va-* 两个
+        #     server pod,各占 4 张卡。
+        #   · 占用率 = FB_USED / (FB_USED + FB_FREE),两个指标都在
+        #     nvidia/custom-metrics.csv 的采集列表里,不用硬编码各代卡的显存总量。
+        #   · 告警身份 = (Hostname, gpu, modelName) 这张卡;聚合特意丢掉 exported_pod ——
+        #     否则 pod 滚动重启一次告警身份就换一次(旧 resolved + 新 firing,群里冒
+        #     一对多余通知)。
+        #   · 已知边界:标签跟着 pod 分配走 —— h3 pod 挂掉/漂移后残留在旧卡上的显存
+        #     不在本规则内(标签已随分配消失),那是"泄漏检测"另一个话题。
+        - alert: H3GPUMemUsageHigh
+          expr: |
+            max by (Hostname, gpu, modelName) (DCGM_FI_DEV_FB_USED{exported_namespace="minimax-h3"})
+              / (
+                  max by (Hostname, gpu, modelName) (DCGM_FI_DEV_FB_USED{exported_namespace="minimax-h3"})
+                + max by (Hostname, gpu, modelName) (DCGM_FI_DEV_FB_FREE{exported_namespace="minimax-h3"})
+                ) > 0.90
+          for: 10m
+          labels:
+            severity: warning
+            channel: infra
+          annotations:
+            summary: "h3 {{ $labels.Hostname }} GPU{{ $labels.gpu }} 显存占用 {{ $value | humanizePercentage }}"
+            description: "h3(minimax-h3)占用的这张卡显存占用率超过 90%,已持续 10 分钟。只统计 h3 的卡,LLM 服务的卡不在范围内;若 h3 的 SGLang mem_fraction_static 预留比例本身高于 0.9,此告警会常亮 —— 直接调 expr 里的 0.90。"
