@@ -120,7 +120,8 @@ versions:
   # (routing / autoscaling / inference.modelsphere.dev). A group rename is a
   # migration, not an upgrade: a cluster already running the previous versions
   # stays on them until it migrates, pinning the old versions in its own file.
-  bodylogExporter: "0.3.0"
+  bodylogExporter: "0.3.1"       # appVersion 0.2.7: the finish_reason="none"
+                                 # bucket the LLMSilentTruncation alert needs
   autoconfig: "0.4.0"
   # The inference engines. They are charts of ours like any other here: a
   # `models:` entry picks WHICH engine it wants, not which version, so the repo
