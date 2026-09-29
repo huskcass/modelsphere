@@ -131,9 +131,9 @@ versions:
   vllm: "0.6.2"
 
   llmOperator: "0.3.0"
-  llmslo: "0.2.0"
-  sloApi: "0.2.0-rc1"           # image tag; the chart's own default (v0.1) predates
-                                # the API-group resolution -- see llmslo-images.yaml.gotmpl
+  llmslo: "0.3.1"               # 0.3.0 widened both roles to allow either API
+                                # group; 0.3.1 defaults slo-api to a 0.2.0 image
+  sloApi: "0.2.0"               # asks the API server which group it serves
   llmCanaryOperator: "0.2.6"
 
   volcano: "1.15.1"
