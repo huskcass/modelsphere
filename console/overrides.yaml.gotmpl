@@ -1,0 +1,7 @@
+# The console image follows registry (public Docker Hub by default in
+# default.yaml, overridden to a private registry where a cluster has one).
+#
+# tag is not pinned here: it follows the chart's appVersion, so an upgrade is
+# a one-line change to versions.console, a single source of truth.
+image:
+  repository: {{ .Values.registry }}/console

@@ -95,6 +95,8 @@ Exposing that outside the cluster is a Gateway, an Ingress or a Service of your 
 | bodylog, bodylog-exporter | Full request/response records from the router, and Prometheus metrics from them | [llm-openresty](https://github.com/modelsphere/llm-openresty) |
 | **Engines** | | |
 | sglang, vllm charts | The engine binaries are upstream; the charts are what makes them serve: shutdown that drains in-flight requests and then gets the GPUs released, hang-watcher wired to the liveness probe, the model's own CART, one instance spanning several nodes (LeaderWorkerSet), and the routing and scaling CRs that put the model on the router | [helm-charts](https://github.com/modelsphere/helm-charts) |
+| **Portal** | | |
+| console | ModelSphere community portal: identity (users, roles, login) and a federation gateway to Swiss and other backends | [console](https://github.com/modelsphere/console) |
 
 ## Documentation
 

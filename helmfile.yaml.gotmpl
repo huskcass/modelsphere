@@ -774,6 +774,25 @@ releases:
       - llm-operator/canary-images.yaml.gotmpl
 {{- end }}
 
+  # ─────────────────────────────────────────────────────────────────── portal
+  # ModelSphere Console: identity (users, roles, login) and a federation
+  # gateway to Swiss and other backends. On its own it only does identity;
+  # point it at a Swiss for the Model Serving pages — the chart's
+  # values-existing-stack.example.yaml shows the externalSwiss values.
+  #
+  # The chart comes from chartRepo like the other charts of ours, so this
+  # needs modelsphere/helm-charts to have published the pinned version
+  # (versions.console below).
+  - name: console
+    namespace: {{ .Values.namespaces.console }}
+    chart: {{ template "chartref" (dict "local" $local "name" "console" "ver" .Values.versions.console "fallback" "modelsphere/console") }}
+    version: {{ .Values.versions.console | quote }}
+    installed: {{ .Values.enabled.console }}
+    labels:
+      tier: portal
+    values:
+      - console/overrides.yaml.gotmpl
+
   # ─────────────────────────────────────────────────────────────── gang scheduling
   # Volcano schedules an LWS leader+worker group as a unit, so a group either
   # lands whole or takes nothing — the failure it prevents is a leader holding 8
