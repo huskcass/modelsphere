@@ -5,3 +5,27 @@
 # a one-line change to versions.console, a single source of truth.
 image:
   repository: {{ .Values.registry }}/console
+
+# swissd, the model deployment backend, installed as this release's subchart
+# (the chart's other mode, externalSwiss, is for a swissd installed elsewhere).
+# rbac.namespaces lists the namespaces holding model releases, so swissd can
+# see them: every models[] entry's namespace, defaulting to llm-demo the way
+# the model releases themselves do — llm-demo when the cluster declares no
+# models yet. A cluster that keeps models elsewhere and wants swissd to stay
+# namespaced overrides swiss.rbac.namespaces in its own environment file
+# (lists replace wholesale); the alternative is rbac.scope: cluster, which the
+# chart allows but which grants cluster-wide secret reads.
+swiss:
+  enabled: true
+  rbac:
+    namespaces:
+{{- $swissNs := list }}
+{{- range $m := (dig "models" (list) .Values) }}
+{{-   $swissNs = append $swissNs (dig "namespace" "llm-demo" $m) }}
+{{- end }}
+{{- if not $swissNs }}
+{{-   $swissNs = list "llm-demo" }}
+{{- end }}
+{{- range $ns := $swissNs | uniq }}
+      - {{ $ns | quote }}
+{{- end }}
