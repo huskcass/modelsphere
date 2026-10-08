@@ -139,6 +139,8 @@ versions:
   # The ModelSphere portal. Published to chartRepo by modelsphere/helm-charts;
   # keep this in step with the chart release there.
   console: "0.1.2"
+  # swissd, the model deployment backend behind the portal. Same deal.
+  swiss: "0.6.3"
 
   volcano: "1.15.1"
   mindCluster: "26.1.0"           # == ascend/mindcluster-deploy-tool-26.1.0.tgz
@@ -237,7 +239,7 @@ enabled:
   # Not published outside, so they are off by default and switched on
   # explicitly by a cluster that has them.
   llmCanaryOperator: false
-  # The portal, with swissd as its subchart (see console/overrides.yaml.gotmpl).
+  # The portal: console plus swissd as its own release (see the helmfile).
   console: true
 
   condition2taint: false

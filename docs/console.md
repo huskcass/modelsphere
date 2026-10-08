@@ -1,8 +1,9 @@
 # Console: opening the portal
 
 ModelSphere Console is the web UI for the stack: users, roles and login, plus
-the Model Serving pages backed by the swissd this release installs beside it.
-The release is on by default (`enabled.console` in `environments/default.yaml`).
+the Model Serving pages backed by swissd, which the helmfile installs as its
+own release beside it. The portal is on by default (`enabled.console` in
+`environments/default.yaml`).
 
 ## First visit
 
@@ -28,12 +29,14 @@ place of `console` above.)
 
 - **Identity**: users, roles, login records — the admin you just set a password
   for, and any further users you create.
-- **Model Serving pages**: swissd ships inside this release, so deploying a
-  model (`docs/deploy-a-model.md`) lights them up with no extra wiring.
+- **Model Serving pages**: deploying a model (`docs/deploy-a-model.md`) lights
+  them up — console talks to the `swissd` release over the cluster DNS, no
+  extra wiring.
 
 ## Swiss running elsewhere
 
-If your swissd lives outside this helmfile, the bundled one is the wrong one to
-keep: set `swiss.enabled: false` and fill in `externalSwiss` (url, proxyKey
-secret, profile) in your cluster's environment file — the console chart's
+If your swissd lives outside this helmfile, the bundled `swissd` release is
+the wrong one to keep: turn the portal off (`enabled.console: false`) and set
+`swiss.enabled: false` plus `externalSwiss` (url, proxyKey secret, profile) for
+a console release of your own — the console chart's
 `values-existing-stack.example.yaml` shows the shape.
