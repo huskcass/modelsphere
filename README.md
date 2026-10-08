@@ -87,7 +87,7 @@ Exposing that outside the cluster is a Gateway, an Ingress or a Service of your 
 | continuation-gateway | Sits in front of a model's CART; when a streamed completion stalls or drops mid-generation, resumes it once from what the client already received, so the client sees one complete stream. SGLang only; switched on per model in the sglang chart | [continuation_gateway](https://github.com/modelsphere/continuation_gateway) |
 | **Observability** | | |
 | bodylog, bodylog-exporter | Full request/response records from the router, and Prometheus metrics from them | [llm-openresty](https://github.com/modelsphere/llm-openresty) |
-| **Deployment** | | |
+| **Operate** | | |
 | swiss | Deploy control plane for the sglang and vllm charts: plans a release from the [model catalog](https://github.com/modelsphere/model-catalog) and the cluster's site profile, then renders, diffs and applies it -- as a CLI or as an in-cluster server with a web UI | [swiss](https://github.com/modelsphere/swiss) |
 | **Engines** | | |
 | sglang, vllm charts | The engine binaries are upstream; the charts are what makes them serve: shutdown that drains in-flight requests and then gets the GPUs released, hang-watcher wired to the liveness probe, the model's own CART, one instance spanning several nodes (LeaderWorkerSet), and the routing and scaling CRs that put the model on the router | [helm-charts](https://github.com/modelsphere/helm-charts) |
