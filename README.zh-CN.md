@@ -1,6 +1,8 @@
-![logo-modelsphere](docs/logo-modelsphere.png)
+<p align="center">
+  <img alt="ModelSphere" src="docs/logo-modelsphere.png" width="480">
+</p>
 
-# 面向大模型推理的生产级基础设施
+<h1 align="center">面向大模型推理的生产级基础设施</h1>
 
 <p align="center">
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/License-Apache%202.0-blue.svg"></a>

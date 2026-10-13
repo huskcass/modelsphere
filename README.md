@@ -1,6 +1,8 @@
-![logo-modelsphere](docs/logo-modelsphere.png)
+<p align="center">
+  <img alt="ModelSphere" src="docs/logo-modelsphere.png" width="480">
+</p>
 
-# Production-Grade Infrastructure for LLM Inference
+<h1 align="center">Production-Grade Infrastructure for LLM Inference</h1>
 
 <p align="center">
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/License-Apache%202.0-blue.svg"></a>
