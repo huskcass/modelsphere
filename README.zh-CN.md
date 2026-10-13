@@ -1,4 +1,6 @@
-# ModelSphere：面向大模型推理的生产级基础设施
+![logo-modelsphere](docs/logo-modelsphere.png)
+
+# 面向大模型推理的生产级基础设施
 
 <p align="center">
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/License-Apache%202.0-blue.svg"></a>
@@ -62,7 +64,7 @@ helm upgrade --install qwen modelsphere/sglang -n llm-demo --create-namespace \
 
 **方式二：使用图形化平台**
 
-你也可以通过图形化平台来部署模型。
+你也可以通过图形化控制平台来部署模型（[了解更多](https://github.com/modelsphere/console)）。
 
 ![image-20261008152111862](docs/model_catalog.png)
 

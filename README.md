@@ -1,4 +1,6 @@
-# ModelSphere: Production-Grade Infrastructure for LLM Inference
+![logo-modelsphere](docs/logo-modelsphere.png)
+
+# Production-Grade Infrastructure for LLM Inference
 
 <p align="center">
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/License-Apache%202.0-blue.svg"></a>
@@ -9,7 +11,6 @@
 <p align="center">
   English | <a href="./README.zh-CN.md">简体中文</a>
 </p>
-
 
 ## Overview
 
@@ -62,7 +63,7 @@ The model is served through the routing layer, at `http://openresty.llm-route.sv
 
 **Method 2: Using the GUI platform**
 
-Alternatively, you can use the GUI platform to deploy a model.
+Alternatively, you can use the GUI console to deploy a model ([read more](https://github.com/modelsphere/console)).
 
 ![image-20261008152111862](docs/model_catalog.png)
 
