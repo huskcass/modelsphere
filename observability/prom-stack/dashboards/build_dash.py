@@ -176,7 +176,16 @@ def eng(sel):
     # 引擎(sglang/vllm)指标的 service label 是 k8s Service 名(kimi-k25-leader),
     # 跟 bodylog/openresty 的 "<ns>/<name>" 口径不是一套 → 归一:剥 -leader 再拼 namespace/
     #   kimi + kimi-k25-leader  ->  kimi/kimi-k25
-    strip = 'label_replace(%s, "service", "$1", "service", "(.*?)(?:-leader)?")' % sel
+    # Suffixes stripped: -leader on a single-instance release, and
+    # -prefill-hl-s<N> / -decode-hl-s<N> on a prefill/decode-disaggregated one,
+    # whose engines are published through one Service per role. Without the
+    # second form such a release normalises to <ns>/<rel>-prefill-hl-s0, which
+    # no bodylog series matches, so flt()/live()'s `and on(service)` drops it
+    # and every engine panel is blank with nothing logged anywhere. Handled here
+    # rather than by relabeling at scrape time so that one rule covers every
+    # cluster, including those on a chart that predates the fix.
+    strip = ('label_replace(%s, "service", "$1", "service", '
+             '"(.*?)(?:-leader|-(?:prefill|decode)-hl-s[0-9]+)?")') % sel
     return 'label_join(%s, "service", "/", "namespace", "service")' % strip
 
 def flt(expr):
@@ -273,7 +282,7 @@ TOTAL_OV = [{"matcher": {"id": "byRegexp", "options": ".* 汇总$"},
 
 def eng_panel(agg, metrics):
     # 每个 metric(sglang / vllm 两套名字)出两个 target:
-    #   ① 该 service 的汇总(sum 面板求和 / avg 面板求均值)—— 常驻
+    #   ① 该 service 的汇总(sum 面板求和 / max 面板取最热实例)—— 常驻
     #   ② 每实例(pod)明细 —— 默认【不显示】,顶部「实例明细」下拉切到「显示」才画
     # 明细默认关是因为 modelforge 有 34 个副本,一上来 34 条细线会把汇总线埋掉。
     # 开关同 $gpu_scope 手法:`and on() (vector($eng_pods) == 1)`,为 0 时右侧空 vector,整条 target 消失。
@@ -581,21 +590,42 @@ def build_main():
     # calib 是 cache-sim 的口径版本,变了就是新序列,用 $calib 锁定当前那批。
     CS = 'service=~"$service",service!="unknown",calib="$calib"'
     CS_DEN = 'clamp_min(sum by(service)(rate(cachesim_prompt_tokens_total{%s}[$__rate_interval])),0.001)' % CS
+    # The two lines come from different sources on purpose. cache-sim is a
+    # separate service and most clusters do not run it; while it is absent BOTH
+    # lines used to vanish, taking the measured number along with the modelled
+    # one and leaving a panel that reads as "no cache hits" rather than "no
+    # simulator". The actual line now comes from bodylog, which exists wherever
+    # the gateway does, so the panel degrades to one line instead of none.
+    #
+    # The cost is that they no longer share a denominator. cache-sim counts only
+    # the requests it can replay -- 200, usage present, not truncated, model
+    # known to it -- while bodylog counts them all; the measured difference is
+    # 0.2-0.4pp, against a gap between the lines that runs to tens of points. A
+    # line that is always there is worth that, but the comparison is no longer
+    # exact arithmetic over one population, and a difference of under half a
+    # point should not be read as signal.
+    _ACT_N = mrg('rate(bodylog_cached_tokens_total{%s}[$__rate_interval])' % SVC)
+    _ACT_D = mrg('rate(bodylog_prompt_tokens_total{%s}[$__rate_interval])' % SVC)
     ts("缓存命中率(cached / prompt tokens)",
        [('sum by(service)(rate(cachesim_theoretical_cached_tokens_total{%s}[$__rate_interval])) / %s' % (CS, CS_DEN),
          "{{service}} 理论最大"),
-        ('sum by(service)(rate(cachesim_actual_cached_tokens_total{%s}[$__rate_interval])) / %s' % (CS, CS_DEN),
+        ('sum by(service)(%s) / clamp_min(sum by(service)(%s), 0.001)' % (_ACT_N, _ACT_D),
          "{{service}} 实际")],
        unit="percentunit", w=8, x=16, minv=0, maxv=1, transformations=STRIP_SVC,
        overrides=[{"matcher": {"id": "byRegexp", "options": ".*理论最大"},
                    "properties": [{"id": "custom.lineStyle", "value": {"dash": [10, 10], "fill": "dash"}},
                                   {"id": "custom.fillOpacity", "value": 0}]}],
-       desc="两条线,**共用同一个分母**(后端真实 prompt_tokens),所以可以直接比大小:\n"
-            "· 实际:cache-sim 记录的后端真实 cached_tokens;\n"
+       desc="两条线,**分母不同,不要当成同一批请求的精确差**:\n"
+            "· 实际:bodylog 记的 usage.prompt_tokens_details.cached_tokens / prompt_tokens —— "
+            "网关侧全量,没部署 cache-sim 的集群也有这条线;\n"
             "· 理论最大:同一批请求在「无多实例打散 / 无驱逐」的理想前缀缓存里重放算出的上界。\n"
-            "两者的差 = 路由打散 + 驱逐吃掉的部分;理论低于实际说明口径或渲染有问题,不是好事。\n\n"
-            "只统计 200 + 有 usage + 未截断 + cache-sim 认识的模型,覆盖率见 cachesim_skipped_total"
-            "(实测与 bodylog 全量口径差 0.2–0.4pp)。calib 是口径版本,变了就是新序列,故用 $calib 锁定当前那批。")
+            "两者的差 ≈ 路由打散 + 驱逐吃掉的部分;理论低于实际说明口径或渲染有问题,不是好事。\n\n"
+            "**理论那条只统计** 200 + 有 usage + 未截断 + cache-sim 认识的模型(覆盖率见 cachesim_skipped_total),"
+            "实际那条是全量 —— 两者口径差 0.2–0.4pp,所以半个点以内的差别不是信号。"
+            "cache-sim 没部署时只剩实际那条,这是预期行为不是故障。"
+            "calib 是 cache-sim 的口径版本,变了就是新序列,故用 $calib 锁定当前那批。\n\n"
+            "⚠️ 实际那条含**跨实例传输**:vllm 的 cached_tokens 文档定义是 local + external,"
+            "PD 分离下 decode 收到的 KV 会被计入,所以它不等于前缀缓存命中率 —— 那个看「引擎 cache 命中率」。")
     _y[0] += 8
     # TPM / RPM:速率 × 60 换算成「每分钟」。× 60 与窗口大小无关 —— rate() 返回的就是每秒值,
     # 乘 60 即每分钟;窗口只决定平滑程度。(曾经写死 [1m] 并把理由记成「换算成每分钟」,是误解。)
@@ -634,10 +664,30 @@ def build_main():
                "归一后对不上活服务的历史名(如 kimi-sglang-sglang-svc)自动消失。"
                "默认只画该 service 的汇总(粗实线);顶部「实例明细」切到【显示】后,每个后端 pod 再各画一条细虚线,用来看实例间倾斜/掉队。"
                "图例是表格,列当前值/峰值,可点表头排序。")
-    ts("KV / token_usage 占用",
-       eng_panel("avg", ["sglang:token_usage", "vllm:gpu_cache_usage_perc"]),
+    # vLLM renamed this gauge when the V1 engine landed: gpu_cache_usage_perc ->
+    # kv_cache_usage_perc. Both are queried because a fleet can be mid-upgrade,
+    # and whichever name an engine does not export simply yields no series.
+    # Measured on a cluster running vLLM 0.30: gpu_cache_usage_perc had 0 series
+    # across every vLLM release there while kv_cache_usage_perc had one per
+    # instance -- this panel had been empty for every vLLM service without anyone
+    # noticing, because an empty panel and an idle service look alike.
+    # max, not avg. This gauge has a hard ceiling, so the question it answers is
+    # "how much headroom is left", and the answer is the hottest instance: the
+    # first one to reach 100% is what bounds the service. An average dilutes it
+    # -- 34 replicas with one wedged at 95% average out near idle, and on a
+    # prefill/decode-disaggregated release the two roles differ by more than 2x
+    # (measured: prefill 11-17%, decode 28-30%), so their mean describes neither
+    # while max lands on the decode side that actually binds. Skew in the other
+    # direction is what the per-instance toggle is for.
+    ts("KV / token_usage 占用(最热实例)",
+       eng_panel("max", ["sglang:token_usage",
+                         "vllm:gpu_cache_usage_perc", "vllm:kv_cache_usage_perc"]),
        unit="percentunit", w=8, x=0, minv=0, maxv=1, overrides=TOTAL_OV, legend_calcs=LEGEND_CALCS, linestyle=DASH,
-       desc="sglang token_usage / vllm gpu_cache_usage_perc(0-1)。汇总线 = 该 service 所有实例均值。" + ENGDESC)
+       desc="sglang token_usage / vllm kv_cache_usage_perc(旧名 gpu_cache_usage_perc,两者都查)(0-1)。"
+            "**汇总线 = 该 service 实例中的最高值**,不是均值 —— 这是个有硬顶的量,要看的是余量,"
+            "而先到 100% 的那个实例才是约束。均值会把它冲淡(34 副本里一个卡在 95%,平均下来接近空闲);"
+            "PD 分离部署下 prefill 与 decode 占用差一倍以上,max 会落在真正受限的 decode 侧。"
+            "反方向的倾斜(某实例特别闲)看「实例明细」。" + ENGDESC)
     # 运行中 / 等待中 合成一张:两者是同一队列的两端(在跑 vs 排队),分开看要来回扫视,
     # 而且 num_queue 平时恒 0、单独占一格浪费。合并后「等待中抬头而运行中压顶」= 后端打满。
     _run = ["sglang:num_running_reqs", "vllm:num_requests_running"]
@@ -655,16 +705,61 @@ def build_main():
     # ⚠️ 不能用 avg(sglang:cache_hit_rate):那是【瞬时比率】,空闲 pod 报 0,
     #    实测 modelforge 40 个 pod 里 37 个是 0,一平均把 59% 稀释成 5.96%(差 10 倍)。
     #    正确口径是 token 加权:sum(cached_tokens)/sum(prompt_tokens),分子分母各自先求和再相除。
-    _cn = eng('rate(sglang:cached_tokens_total[$__rate_interval])')
-    _cd = eng('rate(sglang:prompt_tokens_total[$__rate_interval])')
-    ts("引擎 cache 命中率(token 加权)",
-       [(flt('sum by(service)(%s) / clamp_min(sum by(service)(%s), 0.001)' % (_cn, _cd)), "{{service}} 汇总"),
-        ('%s\n  and on() (vector($eng_pods) == 1)'
-         % flt('sum by(service,pod)(%s) / clamp_min(sum by(service,pod)(%s), 0.001)' % (_cn, _cd)), "{{pod}}")],
+    # One (hits, queries) pair per engine, both already counted in TOKENS, so the
+    # ratio is token-weighted without further work. vLLM's pair was missing, which
+    # left this panel blank on any vLLM-only cluster -- and since an empty panel
+    # and an engine with no cache traffic look the same, nobody noticed.
+    #
+    # vLLM's LOCAL pair is the analogue of sglang's: `prefix_cache_hits_total`
+    # counts tokens served from this engine's own radix tree. The separate
+    # `external_prefix_cache_*` pair counts tokens a KV connector brought in from
+    # another instance and is deliberately NOT folded in here: on a
+    # prefill/decode-disaggregated release the decode side receives nearly every
+    # prompt that way, so adding it would read as a ~100% local hit rate and hide
+    # whether prefix reuse is working at all.
+    #
+    # That exclusion is also what separates this panel from the bodylog one next
+    # to it. bodylog records the response's usage.prompt_tokens_details, which
+    # vLLM documents as "local + external" -- the user-visible saving. Engine-side
+    # local reuse and user-visible saving are different questions; keep both.
+    #
+    # The decode half of a disaggregated release is excluded. It is handed KV per
+    # request rather than matching a prompt against its own tree, so its local
+    # hits can never be anything but zero while its queries still land in the
+    # denominator -- the published rate would then move with the prefill:decode
+    # ratio instead of with how well the cache is doing. Measured on a 2P1D
+    # release replaying one prompt: each prefill reported 4224/4307 = 98.1%,
+    # which is the number worth drawing, and the decode side 0/0.
+    #
+    # Matched on the service label BEFORE eng() normalises it away, using the
+    # same `<rel>-<role>-hl-s<N>` naming the suffix strip already relies on, so
+    # it adds no coupling that was not there -- if that naming ever changes, both
+    # break together rather than this one going quietly wrong. PromQL anchors
+    # regex matchers, so a single-instance release whose own name happens to end
+    # that way is still safe: its service carries a -leader suffix, and the
+    # pattern has to match the label in full.
+    NO_DECODE = 'service!~".*-decode-hl-s[0-9]+"'
+    _ENG_CACHE = [('sglang:cached_tokens_total', 'sglang:prompt_tokens_total'),
+                  ('vllm:prefix_cache_hits_total', 'vllm:prefix_cache_queries_total')]
+    _cache_tg = []
+    for _h, _q in _ENG_CACHE:
+        _cn = eng('rate(%s{%s}[$__rate_interval])' % (_h, NO_DECODE))
+        _cd = eng('rate(%s{%s}[$__rate_interval])' % (_q, NO_DECODE))
+        _cache_tg.append((flt('sum by(service)(%s) / clamp_min(sum by(service)(%s), 0.001)' % (_cn, _cd)),
+                          "{{service}} 汇总"))
+        _cache_tg.append(('%s\n  and on() (vector($eng_pods) == 1)'
+                          % flt('sum by(service,pod)(%s) / clamp_min(sum by(service,pod)(%s), 0.001)'
+                                % (_cn, _cd)), "{{pod}}"))
+    ts("引擎 cache 命中率(token 加权)", _cache_tg,
        unit="percentunit", w=8, x=16, minv=0, maxv=1, overrides=TOTAL_OV, legend_calcs=LEGEND_CALCS, linestyle=DASH,
-       desc="命中前缀缓存的 prompt token 占比(sum(cached)/sum(prompt),按 token 量加权)。"
+       desc="命中前缀缓存的 prompt token 占比(sum(hits)/sum(queries),按 token 量加权)。"
+            "sglang 取 cached_tokens/prompt_tokens,vllm 取 prefix_cache_hits/prefix_cache_queries —— "
+            "两者都是 token 计数,引擎没导出的那套自然没有序列。"
             "不是各 pod 命中率的平均 —— 空闲 pod 的瞬时命中率是 0,直接平均会把结果稀释十倍。"
-            "与「性能」区那个 bodylog 口径的缓存命中率可互相印证(一个是引擎自报,一个是网关记账)。" + ENGDESC + RATE_NOTE)
+            "**只算本地命中**:KV connector 跨实例传来的 token 走 external_prefix_cache_*,不计入,"
+            "否则 PD 分离部署的 decode 侧几乎每条 prompt 都来自传输,这条线会恒等于 100%。"
+            "旁边那个 bodylog 口径记的是响应里的 usage(vllm 定义为 local + external,即用户视角省下的量),"
+            "两者问的不是同一个问题,互相印证而不是互相替代。" + ENGDESC + RATE_NOTE)
     _y[0] += 8
     _y[0] += 8
 
