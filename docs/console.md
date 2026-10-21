@@ -43,8 +43,9 @@ always rendered; emptyDir is not an option. With the defaults
 the cluster's default StorageClass. Set `swissd.persistence.storageClass` to
 name a class, or `swissd.persistence.existingClaim` to a PVC you created (no
 class is needed then, and the size is ignored). The release's presync hook
-refuses to install when that claim or class is missing. See
-[Storage](helmfile-deploy.md#storage).
+runs only when `enabled.console` is true. It refuses to install when that
+claim or class is missing; on the default path an already-Bound `swissd-data`
+claim is enough. See [Storage](helmfile-deploy.md#storage).
 
 ## Swiss running elsewhere
 

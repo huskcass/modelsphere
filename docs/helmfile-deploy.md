@@ -303,7 +303,8 @@ emptyDir. Unless `swissd.persistence` says otherwise, the claim omits
 `storageClassName` and binds the cluster's default StorageClass. On a cluster
 with no default StorageClass the claim stays `Pending`, and because
 `helmDefaults.wait` is false the apply still reports success. The swissd
-presync hook fails the release before that.
+presync hook, rendered only when `enabled.console` is true, fails the release
+before that.
 
 `swissd.persistence` in `environments/default.yaml`:
 
@@ -315,8 +316,9 @@ presync hook fails the release before that.
 - **`size`** — request size when the chart creates the claim. Default `10Gi`.
 
 The presync check resolves storage the same way: an `existingClaim` has to
-exist in `namespaces.console`; a resolved class has to exist; otherwise at
-least one StorageClass must carry
+exist in `namespaces.console`; a resolved class has to exist; otherwise an
+already-Bound `swissd-data` claim in that namespace is enough, and only if it
+is not Bound must at least one StorageClass carry
 `storageclass.kubernetes.io/is-default-class=true`.
 
 With `storage.persistence: true`, four PVCs ask for the class named by
@@ -383,9 +385,10 @@ Four more hooks are checks rather than manifests, and they fail the release
 rather than fix anything: cilium's presync `kubectl get crd
 gateways.gateway.networking.k8s.io` (only when `cilium.gatewayAPI`),
 kube-prometheus-stack's presync `kubectl get storageclass <storage.className>`
-(only when `storage.persistence`), swissd's presync storage check (the PVC
-named by `swissd.persistence.existingClaim`, the StorageClass it resolved, or
-— when neither a claim nor a class is set — a StorageClass annotated
+(only when `storage.persistence`), swissd's presync storage check (only when
+`enabled.console`; the PVC named by `swissd.persistence.existingClaim`, the
+StorageClass it resolved, or — when neither a claim nor a class is set — an
+already-Bound `swissd-data` claim, else a StorageClass annotated
 `storageclass.kubernetes.io/is-default-class=true`), and llm-slo's presync
 namespace create.
 

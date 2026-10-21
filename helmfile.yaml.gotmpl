@@ -813,17 +813,28 @@ releases:
       tier: portal
     values:
       - console/swiss-overrides.yaml.gotmpl
-{{- /* Same resolution as console/swiss-overrides.yaml.gotmpl, so an
-       environment with no `swissd:` block still renders: existingClaim, else
-       an explicit class, else storage.className when storage.persistence is
-       on, else the cluster default (empty class). `=` updates the outer
-       variable; `:=` inside the if would shadow it and the hook would check
-       the wrong thing. */}}
-{{- $swissClaim := dig "swissd" "persistence" "existingClaim" "" .Values }}
-{{- $swissClass := dig "swissd" "persistence" "storageClass" "" .Values }}
-{{- if and (not $swissClass) (dig "storage" "persistence" false .Values) }}
-{{-   $swissClass = dig "storage" "className" "" .Values }}
+{{- /* Same resolution as console/swiss-overrides.yaml.gotmpl. `index` then
+       `default dict`: an environment with no `swissd:` block, or with
+       `swissd:` or `storage:` or `persistence:` null, still renders. `dig`
+       into that nil fails the whole helmfile, and helmfile's `get` errors
+       when the key is absent. Order: existingClaim, else an explicit class,
+       else storage.className when storage.persistence is on, else the
+       cluster default (empty class). `=` updates the outer variable; `:=`
+       inside the if would shadow it and the hook would check the wrong
+       thing. */}}
+{{- $swissd := index .Values "swissd" | default dict }}
+{{- $swissP := index $swissd "persistence" | default dict }}
+{{- $swissClaim := index $swissP "existingClaim" | default "" }}
+{{- $swissClass := index $swissP "storageClass" | default "" }}
+{{- $swissStorage := index .Values "storage" | default dict }}
+{{- if and (not $swissClass) (index $swissStorage "persistence" | default false) }}
+{{-   $swissClass = index $swissStorage "className" | default "" }}
 {{- end }}
+{{- if .Values.enabled.console }}
+    # Only with the portal on: helmfile runs presync on the uninstall path too,
+    # so with enabled.console false an apply would otherwise be blocked once the
+    # claim or class is gone.
+    #
     # swissd 0.7.0 always renders PVC <release>-data for its sqlite database
     # (drafts, plans, the audit log) and refuses to render without persistence,
     # so there is no emptyDir fallback. helmDefaults.wait is false: a claim
@@ -831,7 +842,8 @@ releases:
     # fails the release first. Resolution matches the values file above --
     # existingClaim, else an explicit swissd.persistence.storageClass, else
     # storage.className when storage.persistence is true, else the cluster
-    # default StorageClass.
+    # default StorageClass. An already-Bound swissd-data claim satisfies that
+    # default path.
     hooks:
       - events: ["presync"]
         showlogs: true
@@ -852,13 +864,23 @@ releases:
               exit 1
             fi
 {{- else }}
-            annos=$(kubectl get storageclass -o jsonpath='{range .items[*]}{.metadata.annotations.storageclass\.kubernetes\.io/is-default-class}{"\n"}{.metadata.annotations.storageclass\.beta\.kubernetes\.io/is-default-class}{"\n"}{end}')
+            phase=$(kubectl -n {{ .Values.namespaces.console | quote }} get pvc swissd-data -o jsonpath='{.status.phase}' 2>/dev/null || true)
+            if [ "$phase" = "Bound" ]; then
+              echo "swissd: PVC swissd-data is already Bound; the existing claim is used."
+              exit 0
+            fi
+            if ! annos=$(kubectl get storageclass -o jsonpath='{range .items[*]}{.metadata.annotations.storageclass\.kubernetes\.io/is-default-class}{"\n"}{.metadata.annotations.storageclass\.beta\.kubernetes\.io/is-default-class}{"\n"}{end}'); then
+              echo "swissd: could not list StorageClasses." >&2
+              echo "Set swissd.persistence.storageClass to a class that exists, set swissd.persistence.existingClaim to a PVC you created, or set storage.persistence true and storage.className." >&2
+              exit 1
+            fi
             if ! printf '%s\n' "$annos" | grep -qx true; then
               echo "swissd: no StorageClass is annotated storageclass.kubernetes.io/is-default-class=true." >&2
               echo "The chart always creates PVC swissd-data. Nothing resolved to a class: swissd.persistence.storageClass is empty, swissd.persistence.existingClaim is empty, and storage.className is used only when storage.persistence is true. The claim therefore omits storageClassName and waits on the cluster default. helmDefaults.wait is false, so that Pending claim would not fail the apply." >&2
               echo "Set swissd.persistence.storageClass to a class that exists, set swissd.persistence.existingClaim to a PVC you created, or set storage.persistence true and storage.className." >&2
               exit 1
             fi
+{{- end }}
 {{- end }}
 
   - name: console

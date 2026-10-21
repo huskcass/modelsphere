@@ -39,13 +39,18 @@ rbac:
 #   needed then, and size is ignored by the chart);
 #   storageClass is swissd.persistence.storageClass when that is set, else
 #   storage.className when storage.persistence is true, else left unset.
-# `dig` defaults so an environment file with no `swissd:` block still renders.
-{{- $claim := dig "swissd" "persistence" "existingClaim" "" .Values }}
-{{- $class := dig "swissd" "persistence" "storageClass" "" .Values }}
-{{- if and (not $class) (dig "storage" "persistence" false .Values) }}
-{{-   $class = dig "storage" "className" "" .Values }}
+# `index` then `default dict`: `swissd:` or `storage:` may be missing or null,
+# and `persistence:` may be null. `dig` into that nil fails the render, and
+# helmfile's `get` errors when the key is absent, so neither can read these.
+{{- $swissd := index .Values "swissd" | default dict }}
+{{- $swissP := index $swissd "persistence" | default dict }}
+{{- $claim := index $swissP "existingClaim" | default "" }}
+{{- $class := index $swissP "storageClass" | default "" }}
+{{- $storage := index .Values "storage" | default dict }}
+{{- if and (not $class) (index $storage "persistence" | default false) }}
+{{-   $class = index $storage "className" | default "" }}
 {{- end }}
-{{- $size := dig "swissd" "persistence" "size" "10Gi" .Values }}
+{{- $size := index $swissP "size" | default "10Gi" }}
 persistence:
 {{- if $claim }}
   existingClaim: {{ $claim | quote }}
