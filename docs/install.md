@@ -69,7 +69,7 @@ whatever it has:
 | Requirement | What it means |
 |---|---|
 | Ubuntu 22.04 or newer | what the playbooks are written against. Its 5.15 kernel also clears what our Cilium needs (kernel ≥ 5.10, cgroup v2) -- not a requirement if you run another CNI. On another distro check both, separately: `uname -r`, and `stat -fc %T /sys/fs/cgroup` must say `cgroup2fs`. Cilium reports either one missing as the same error, `Require support for bpf_get_current_cgroup_id()`, whatever kernel version it names |
-| storage | nothing by default -- the monitoring stack runs on emptyDir. ⚠️ Metrics, alert state and anything saved in Grafana's UI are lost when one of those pods restarts |
+| storage | monitoring stack on emptyDir by default -- metrics, alert state and anything saved in Grafana's UI are lost when one of those pods restarts. swissd always binds one 10Gi PVC, via the cluster default StorageClass unless `swissd.persistence` says otherwise |
 | a spare raw block device on 3+ nodes | only if you want durable storage; see [`helmfile-deploy.md`](helmfile-deploy.md#storage) |
 | a node that is not Ubuntu/amd64/NVIDIA | goes through the same playbook with `k8s_install_method=binary` instead of apt, and needs a Python new enough for Ansible plus its own accelerator driver on the host. Procedure: [`add-ascend-node.md`](add-ascend-node.md) |
 
@@ -410,10 +410,12 @@ table at the top of this file.
 
 One thing about the cluster decides whether this converges:
 
-- **Storage is off by default** (`storage.persistence: false`), so Prometheus,
+- **The monitoring stack stores nothing by default** (`storage.persistence: false`), so Prometheus,
   Alertmanager and Grafana run on emptyDir. ⚠️ **A pod restart or reschedule
   loses what it held** -- metrics, silences, and anything saved in Grafana's UI;
-  dashboards provisioned from ConfigMaps come back by themselves. To get durable
+  dashboards provisioned from ConfigMaps come back by themselves. swissd always
+  binds one PVC (10Gi), via the cluster default StorageClass unless
+  `swissd.persistence` says otherwise. To give the monitoring stack durable
   storage -- Ceph as shipped, or your own StorageClass -- see
   [`helmfile-deploy.md`](helmfile-deploy.md#storage).
 

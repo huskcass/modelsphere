@@ -27,3 +27,30 @@ rbac:
 {{- range $ns := $swissNs | uniq }}
       - {{ $ns | quote }}
 {{- end }}
+
+# Persistence for the sqlite database (drafts, plans, the audit log). Since
+# chart 0.7.0 swissd always renders PVC <release>-data and refuses to render
+# without it, so emptyDir is not a fallback. An empty storageClass makes the
+# chart omit storageClassName, and the claim then binds the cluster's default
+# StorageClass.
+#
+# Resolution, the same one the swissd presync hook enforces:
+#   existingClaim, when set -- a PVC created outside this chart (no class is
+#   needed then, and size is ignored by the chart);
+#   storageClass is swissd.persistence.storageClass when that is set, else
+#   storage.className when storage.persistence is true, else left unset.
+# `dig` defaults so an environment file with no `swissd:` block still renders.
+{{- $claim := dig "swissd" "persistence" "existingClaim" "" .Values }}
+{{- $class := dig "swissd" "persistence" "storageClass" "" .Values }}
+{{- if and (not $class) (dig "storage" "persistence" false .Values) }}
+{{-   $class = dig "storage" "className" "" .Values }}
+{{- end }}
+{{- $size := dig "swissd" "persistence" "size" "10Gi" .Values }}
+persistence:
+{{- if $claim }}
+  existingClaim: {{ $claim | quote }}
+{{- end }}
+{{- if $class }}
+  storageClass: {{ $class | quote }}
+{{- end }}
+  size: {{ $size | quote }}

@@ -33,6 +33,19 @@ place of `console` above.)
   them up — console talks to the `swissd` release over the cluster DNS, no
   extra wiring.
 
+## Storage
+
+swissd keeps its sqlite database — drafts, plans, the audit log — on a
+PersistentVolumeClaim `swissd-data` (10Gi). Since chart 0.7.0 that claim is
+always rendered; emptyDir is not an option. With the defaults
+(`swissd.persistence.storageClass` and `existingClaim` empty, and
+`storage.persistence` false) the claim carries no `storageClassName` and binds
+the cluster's default StorageClass. Set `swissd.persistence.storageClass` to
+name a class, or `swissd.persistence.existingClaim` to a PVC you created (no
+class is needed then, and the size is ignored). The release's presync hook
+refuses to install when that claim or class is missing. See
+[Storage](helmfile-deploy.md#storage).
+
 ## Swiss running elsewhere
 
 If your swissd lives outside this helmfile, the bundled `swissd` release is
