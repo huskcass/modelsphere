@@ -35,17 +35,12 @@ place of `console` above.)
 
 ## Storage
 
-swissd keeps its sqlite database — drafts, plans, the audit log — on a
-PersistentVolumeClaim `swissd-data` (10Gi). Since chart 0.7.0 that claim is
-always rendered; emptyDir is not an option. With the defaults
-(`swissd.persistence.storageClass` and `existingClaim` empty, and
-`storage.persistence` false) the claim carries no `storageClassName` and binds
-the cluster's default StorageClass. Set `swissd.persistence.storageClass` to
-name a class, or `swissd.persistence.existingClaim` to a PVC you created (no
-class is needed then, and the size is ignored). The release's presync hook
-runs only when `enabled.console` is true. It refuses to install when that
-claim or class is missing; on the default path an already-Bound `swissd-data`
-claim is enough. See [Storage](helmfile-deploy.md#storage).
+swissd keeps its sqlite database — drafts, plans, the audit log — on a 10Gi
+PersistentVolumeClaim `swissd-data`, bound through the cluster's default
+StorageClass. A default StorageClass is a pre-install requirement; without
+one the claim stays `Pending` and swissd does not start. To use a specific
+class, set the chart's `persistence.storageClass` in
+`console/swiss-overrides.yaml.gotmpl`.
 
 ## Swiss running elsewhere
 

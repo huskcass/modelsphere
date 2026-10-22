@@ -54,6 +54,12 @@ cluster:
 | helm ≥ 3.8 and helmfile ≥ 1.0 | install them yourself; tested on helm v4.3.0 + helmfile 1.8.0 |
 | the helm-diff plugin | `make helm-deps` -- once per machine, and not optional: `helmfile apply` shells out to it |
 
+And on the cluster itself, for **Part C**:
+
+| Requirement | What it means |
+|---|---|
+| a default StorageClass | `kubectl get storageclass` shows one marked `(default)`. With the portal on (`enabled.console`), swissd creates a 10Gi PVC `swissd-data` with no `storageClassName`; with no default class it stays `Pending` and swissd never starts. To use a specific class instead, set `persistence.storageClass` in the swissd release's values (`console/swiss-overrides.yaml.gotmpl`) |
+
 And for **Parts A and B** — preparing machines and creating a cluster. Skip
 these if you already have one:
 
@@ -69,7 +75,7 @@ whatever it has:
 | Requirement | What it means |
 |---|---|
 | Ubuntu 22.04 or newer | what the playbooks are written against. Its 5.15 kernel also clears what our Cilium needs (kernel ≥ 5.10, cgroup v2) -- not a requirement if you run another CNI. On another distro check both, separately: `uname -r`, and `stat -fc %T /sys/fs/cgroup` must say `cgroup2fs`. Cilium reports either one missing as the same error, `Require support for bpf_get_current_cgroup_id()`, whatever kernel version it names |
-| storage | monitoring stack on emptyDir by default -- metrics, alert state and anything saved in Grafana's UI are lost when one of those pods restarts. swissd always binds one 10Gi PVC, via the cluster default StorageClass unless `swissd.persistence` says otherwise |
+| storage | a default StorageClass for swissd's one PVC (see Part C above); otherwise nothing by default -- the monitoring stack runs on emptyDir. ⚠️ Metrics, alert state and anything saved in Grafana's UI are lost when one of those pods restarts |
 | a spare raw block device on 3+ nodes | only if you want durable storage; see [`helmfile-deploy.md`](helmfile-deploy.md#storage) |
 | a node that is not Ubuntu/amd64/NVIDIA | goes through the same playbook with `k8s_install_method=binary` instead of apt, and needs a Python new enough for Ansible plus its own accelerator driver on the host. Procedure: [`add-ascend-node.md`](add-ascend-node.md) |
 
@@ -408,14 +414,16 @@ over `environments/default.yaml`; what each release reads is in
 [`helmfile-deploy.md`](helmfile-deploy.md). Where the code lives is the
 table at the top of this file.
 
-One thing about the cluster decides whether this converges:
+Two things about the cluster decide whether this converges:
 
-- **The monitoring stack stores nothing by default** (`storage.persistence: false`), so Prometheus,
+- **A default StorageClass must exist** (see [prerequisites](#1-prerequisites)).
+  swissd creates a 10Gi PVC `swissd-data` with no `storageClassName`; with no
+  default class it stays `Pending`, and because `helmDefaults.wait` is false
+  the apply still reports success.
+- **Monitoring storage is off by default** (`storage.persistence: false`), so Prometheus,
   Alertmanager and Grafana run on emptyDir. ⚠️ **A pod restart or reschedule
   loses what it held** -- metrics, silences, and anything saved in Grafana's UI;
-  dashboards provisioned from ConfigMaps come back by themselves. swissd always
-  binds one PVC (10Gi), via the cluster default StorageClass unless
-  `swissd.persistence` says otherwise. To give the monitoring stack durable
+  dashboards provisioned from ConfigMaps come back by themselves. To get durable
   storage -- Ceph as shipped, or your own StorageClass -- see
   [`helmfile-deploy.md`](helmfile-deploy.md#storage).
 

@@ -206,8 +206,8 @@ enabled:
   # Ceph, i.e. durable storage, is OFF by default: it needs a spare raw block
   # device on at least three nodes, which most clusters arriving here do not
   # have. `storage.persistence: false` below means the monitoring stack asks
-  # for none, but swissd (enabled.console) always asks for one PVC, which then
-  # needs a default StorageClass or swissd.persistence set.
+  # for no PVC; swissd (enabled.console) still creates one, on the cluster's
+  # default StorageClass -- a pre-install requirement, see docs/install.md.
   # Turn all three on -- plus `ceph.nodes` and `storage.persistence: true` -- for
   # a cluster that has the disks.
   rookCeph: false                 # operator; bundles the ceph-csi-operator subchart
@@ -372,20 +372,6 @@ storage:
   #    StorageClass -- `enabled.rookCeph*` above and `ceph.nodes`, or your own --
   #    and set this true.
   persistence: false
-
-# swissd always needs a PVC (it cannot use emptyDir since 0.7.0): the chart
-# renders `<release>-data` for its sqlite database (drafts, plans, the audit
-# log) and refuses to render without persistence. `storageClass: ""` means
-# storage.className when storage.persistence is true, otherwise no
-# storageClassName (the cluster's default StorageClass); set it to name a
-# class explicitly. `existingClaim` uses a PVC you created yourself (then no
-# class is needed and size is ignored). The swissd presync check fails the
-# release early when the claim or class it would use does not exist.
-swissd:
-  persistence:
-    storageClass: ""
-    existingClaim: ""
-    size: 10Gi
 
 # ---------------------------------------------------------------- model services
 # The inference workloads themselves are ordinary helmfile releases too, but

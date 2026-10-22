@@ -158,7 +158,7 @@ a cluster's own file is a couple of dozen lines rather than a copy. helmfile
 merges left to right: maps merge key by key, **lists are replaced wholesale**
 (which is what you want for `ceph.nodes`).
 
-Seven releases read their values through a template instead of a flat file,
+Six releases read their values through a template instead of a flat file,
 because their values contain per-cluster facts:
 
 | Release | Values file | Environment key |
@@ -168,7 +168,6 @@ because their values contain per-cluster facts:
 | `bodylog` | `llmgateway/bodylog-overrides.yaml.gotmpl` | `llmGateway:` — the node and directory the sinks live on, memory limit, token |
 | `bodylog-exporter` | `llmgateway/bodylog-exporter.yaml.gotmpl` | `llmGateway:` — the same node and directory, ServiceMonitor on/off |
 | `kube-prometheus-stack` | `observability/prom-stack/overrides.yaml.gotmpl` | `storage:` — the StorageClass name, and whether the four PVCs exist at all |
-| `swissd` | `console/swiss-overrides.yaml.gotmpl` | `swissd.persistence` (and `storage:` when it is on) — the class or existing claim for its database PVC; `models` — the namespaces it may deploy into |
 | `alert-webhook` | `observability/alert-webhook/config.yaml.gotmpl` | `alertWebhook.urls`, `name` — the notification targets and the cluster label |
 
 Everything *not* templated in those files is a deliberate stack-wide
@@ -289,37 +288,20 @@ is the answer on a fresh cluster; the flag is not.
 ## Storage
 
 **The monitoring stack defaults to no storage.** `storage.persistence` is off, so
-Prometheus, Alertmanager and Grafana run on emptyDir and that stack comes up on
-a cluster with no storage backend. ⚠️ **A pod restart or reschedule loses
+Prometheus, Alertmanager and Grafana run on emptyDir and that stack needs no
+storage backend. ⚠️ **A pod restart or reschedule loses
 what it held**: Prometheus its metrics, Alertmanager its silences and
 notification state (an alert already silenced or sent can fire again), Grafana
 its sqlite — hand-saved dashboards, users, API keys, annotations. Dashboards
 provisioned from ConfigMaps come back by themselves.
 
-swissd does not follow that default. Chart 0.7.0 always renders a 10Gi
-PersistentVolumeClaim `<release>-data` for its sqlite database (drafts, plans,
-the audit log) and refuses to render without persistence, so it cannot use
-emptyDir. Unless `swissd.persistence` says otherwise, the claim omits
-`storageClassName` and binds the cluster's default StorageClass. On a cluster
-with no default StorageClass the claim stays `Pending`, and because
-`helmDefaults.wait` is false the apply still reports success. The swissd
-presync hook, rendered only when `enabled.console` is true, fails the release
-before that.
-
-`swissd.persistence` in `environments/default.yaml`:
-
-- **`storageClass`** — empty means `storage.className` when `storage.persistence`
-  is true, and no `storageClassName` otherwise (the cluster default). Set it
-  to name a class explicitly.
-- **`existingClaim`** — a PVC you created yourself. No class is needed then,
-  and `size` is ignored.
-- **`size`** — request size when the chart creates the claim. Default `10Gi`.
-
-The presync check resolves storage the same way: an `existingClaim` has to
-exist in `namespaces.console`; a resolved class has to exist; otherwise an
-already-Bound `swissd-data` claim in that namespace is enough, and only if it
-is not Bound must at least one StorageClass carry
-`storageclass.kubernetes.io/is-default-class=true`.
+swissd is the exception, and it is a pre-install requirement rather than a
+setting here: chart 0.7.0 always creates a 10Gi PVC `swissd-data` for its
+sqlite database (drafts, plans, the audit log), with no `storageClassName`, so
+**the cluster must have a default StorageClass**. Without one the claim stays
+`Pending` and, since `helmDefaults.wait` is false, the apply still reports
+success. A site that needs a specific class sets the chart's
+`persistence.storageClass` in `console/swiss-overrides.yaml.gotmpl`.
 
 With `storage.persistence: true`, four PVCs ask for the class named by
 `storage.className` — Prometheus, Alertmanager, Thanos Ruler and Grafana — and
@@ -381,16 +363,11 @@ the cluster complete rather than complete-except-for-a-kubectl-step.
 | `kubectl apply -f scheduler/volcano/pdb.yaml` | `volcano` | postsync | `enabled.volcanoPdb` |
 | `kubectl apply --server-side -k observability/prom-stack/dashboards/` | `kube-prometheus-stack` | postsync | `enabled.llmDashboards` |
 
-Four more hooks are checks rather than manifests, and they fail the release
+Three more hooks are checks rather than manifests, and they fail the release
 rather than fix anything: cilium's presync `kubectl get crd
 gateways.gateway.networking.k8s.io` (only when `cilium.gatewayAPI`),
 kube-prometheus-stack's presync `kubectl get storageclass <storage.className>`
-(only when `storage.persistence`), swissd's presync storage check (only when
-`enabled.console`; the PVC named by `swissd.persistence.existingClaim`, the
-StorageClass it resolved, or — when neither a claim nor a class is set — an
-already-Bound `swissd-data` claim, else a StorageClass annotated
-`storageclass.kubernetes.io/is-default-class=true`), and llm-slo's presync
-namespace create.
+(only when `storage.persistence`), and llm-slo's presync namespace create.
 
 The DCGM one matters more than it looks: `nvidia/overrides.yaml` sets
 `dcgmExporter.config.create: false` and names a ConfigMap the chart therefore
