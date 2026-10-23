@@ -7,8 +7,8 @@ image:
   repository: {{ .Values.registry }}/swissd
 
 # No PVC by default: sqlite goes on an emptyDir, so the audit log and plan
-# history go on restart. Recommended: turn it on (needs a StorageClass), see
-# docs/console.md.
+# history go when the pod is replaced. Recommended: turn it on (needs a
+# StorageClass or existingClaim), see docs/console.md.
 persistence:
   enabled: false
 

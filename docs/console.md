@@ -34,8 +34,9 @@ place of `console` above.)
   extra wiring.
 
 swissd runs without persistent storage by default: its sqlite database sits on
-an emptyDir, so the audit log and plan history are lost on restart. Turning on
-storage for swiss is recommended — `persistence.enabled: true` in
+an emptyDir, so the audit log and plan history are lost whenever the pod is
+deleted or rescheduled, a rollout included. Turning on storage for swiss is
+recommended — `persistence.enabled: true` in
 `console/swiss-overrides.yaml.gotmpl`, which needs a default StorageClass or
 `persistence.storageClass` / `persistence.existingClaim`. An install that
 already has the `swissd-data` PVC sets `persistence.enabled: true` there
