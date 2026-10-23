@@ -138,16 +138,16 @@ versions:
   sglang: "0.8.2"
   vllm: "0.6.2"
 
-  llmOperator: "0.3.0"
+  llmOperator: "0.5.0"
   llmslo: "0.3.1"               # 0.3.0 widened both roles to allow either API
                                 # group; 0.3.1 defaults slo-api to a 0.2.0 image
   sloApi: "0.2.0"               # asks the API server which group it serves
   llmCanaryOperator: "0.2.6"
   # The ModelSphere portal. Published to chartRepo by modelsphere/helm-charts;
   # keep this in step with the chart release there.
-  console: "0.1.2"
+  console: "0.2.1"
   # swissd, the model deployment backend behind the portal. Same deal.
-  swiss: "0.6.3"
+  swiss: "0.7.1"
 
   volcano: "1.15.1"
   mindCluster: "26.1.0"           # == ascend/mindcluster-deploy-tool-26.1.0.tgz

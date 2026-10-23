@@ -6,6 +6,12 @@
 image:
   repository: {{ .Values.registry }}/swissd
 
+# No PVC by default: sqlite goes on an emptyDir, so the audit log and plan
+# history go when the pod is replaced. Recommended: turn it on (needs a
+# StorageClass or existingClaim), see docs/console.md.
+persistence:
+  enabled: false
+
 # Console logs users in and calls swissd with the front-proxy key: the key is
 # generated into swissd's auth Secret, which console reads directly (same
 # namespace). The password login stays on beside it.
