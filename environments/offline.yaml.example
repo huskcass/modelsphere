@@ -54,8 +54,11 @@ enabled:
   condition2taint: false
 
 # Left off (the repo default), so the monitoring stack runs on emptyDir rather
-# than waiting for a StorageClass that does not exist here. ⚠️ Metrics, alert
-# state and anything saved in Grafana's UI go when one of those pods restarts.
+# than waiting for a StorageClass. ⚠️ Metrics, alert state and anything saved
+# in Grafana's UI go when one of those pods restarts. swissd (the portal) still
+# wants a default StorageClass for its PVC; with none, set
+# `persistence.enabled: false` in console/swiss-overrides.yaml.gotmpl to run it
+# on an emptyDir (its audit log and stored plans go on restart).
 storage:
   persistence: false
 

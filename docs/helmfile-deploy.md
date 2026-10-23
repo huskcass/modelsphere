@@ -295,13 +295,18 @@ notification state (an alert already silenced or sent can fire again), Grafana
 its sqlite — hand-saved dashboards, users, API keys, annotations. Dashboards
 provisioned from ConfigMaps come back by themselves.
 
-swissd is the exception, and it is a pre-install requirement rather than a
-setting here: chart 0.7.0 always creates a 10Gi PVC `swissd-data` for its
-sqlite database (drafts, plans, the audit log), with no `storageClassName`, so
-**the cluster must have a default StorageClass**. Without one the claim stays
-`Pending` and, since `helmDefaults.wait` is false, the apply still reports
-success. A site that needs a specific class sets the chart's
-`persistence.storageClass` in `console/swiss-overrides.yaml.gotmpl`.
+swissd is the exception: by default chart 0.7.1 creates a 10Gi PVC
+`swissd-data` for its sqlite database (drafts, plans, the audit log), with no
+`storageClassName`, so **a default StorageClass is the recommended setup**.
+Without one the claim stays `Pending` and, since `helmDefaults.wait` is false,
+the apply still reports success. A site that needs a specific class sets the
+chart's `persistence.storageClass` in `console/swiss-overrides.yaml.gotmpl`; a
+cluster with no StorageClass sets `persistence.enabled: false` there, and
+swissd runs on an emptyDir (`persistence.emptyDir.sizeLimit` optional). ⚠️ A
+restart then loses the audit log and the stored plans that rollback and revert
+use; deployed releases stay visible and upgradable. Switching an existing
+install to that makes helm delete `swissd-data` — to keep it, first run
+`kubectl -n console annotate pvc swissd-data helm.sh/resource-policy=keep`.
 
 With `storage.persistence: true`, four PVCs ask for the class named by
 `storage.className` — Prometheus, Alertmanager, Thanos Ruler and Grafana — and
