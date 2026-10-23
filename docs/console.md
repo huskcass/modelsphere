@@ -33,21 +33,14 @@ place of `console` above.)
   them up — console talks to the `swissd` release over the cluster DNS, no
   extra wiring.
 
-## Storage
-
-swissd keeps its sqlite database — drafts, plans, the audit log — by default
-on a 10Gi PersistentVolumeClaim `swissd-data`, bound through the cluster's
-default StorageClass. A default StorageClass is the recommended setup; without
-one the claim stays `Pending` and swissd does not start. To use a specific
-class, set the chart's `persistence.storageClass` in
-`console/swiss-overrides.yaml.gotmpl`.
-
-A cluster with no StorageClass sets `persistence.enabled: false` there
-instead: swissd keeps the database on an emptyDir, and ⚠️ a restart loses the
-audit log and the stored plans behind rollback and revert, while deployed
-releases stay visible and upgradable. Switching an existing install over makes
-helm delete `swissd-data`; to keep it, first run
-`kubectl -n console annotate pvc swissd-data helm.sh/resource-policy=keep`.
+swissd runs without persistent storage by default: its sqlite database sits on
+an emptyDir, so the audit log and plan history are lost on restart. Turning on
+storage for swiss is recommended — `persistence.enabled: true` in
+`console/swiss-overrides.yaml.gotmpl`, which needs a default StorageClass or
+`persistence.storageClass` / `persistence.existingClaim`. An install that
+already has the `swissd-data` PVC sets `persistence.enabled: true` there
+before upgrading, or first runs `kubectl -n <console-ns> annotate pvc
+swissd-data helm.sh/resource-policy=keep`; otherwise helm deletes the claim.
 
 ## Swiss running elsewhere
 

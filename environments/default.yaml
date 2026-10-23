@@ -205,10 +205,7 @@ enabled:
 
   # Ceph, i.e. durable storage, is OFF by default: it needs a spare raw block
   # device on at least three nodes, which most clusters arriving here do not
-  # have. `storage.persistence: false` below means the monitoring stack asks
-  # for no PVC; swissd (enabled.console) still creates one by default, on the
-  # cluster's default StorageClass -- or runs on an emptyDir with the chart's
-  # `persistence.enabled: false`, see docs/install.md.
+  # have, and `storage.persistence: false` below means nothing asks for a PVC.
   # Turn all three on -- plus `ceph.nodes` and `storage.persistence: true` -- for
   # a cluster that has the disks.
   rookCeph: false                 # operator; bundles the ceph-csi-operator subchart
