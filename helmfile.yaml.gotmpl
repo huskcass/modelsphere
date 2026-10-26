@@ -46,6 +46,11 @@ environments:
   default:
     values:
       - environments/default.yaml
+  # A single-node, CPU-only kind cluster: what test/e2e installs (make test-e2e).
+  kind:
+    values:
+      - environments/default.yaml
+      - environments/kind.yaml
   # Two air-gapped environments, one per registry mode. The files themselves are
   # NOT in the repo -- they describe one particular cluster, which is nobody
   # else's business -- so copy environments/offline.yaml.example to
@@ -631,6 +636,11 @@ releases:
       tier: llmgate
     values:
       - llmgateway/openresty.yaml.gotmpl
+{{- with dig "llmGateway" "openrestyOverrides" nil .Values }}
+      # Chart values merged last, e.g. replicas and resources on a small
+      # cluster (environments/kind.yaml). Unset adds nothing.
+      - {{ toJson . }}
+{{- end }}
 
   - name: bodylog
     namespace: {{ .Values.namespaces.llmRoute }}
@@ -813,6 +823,24 @@ releases:
       tier: portal
     values:
       - console/swiss-overrides.yaml.gotmpl
+    hooks:
+      # swissd's rbac puts a Role in every model namespace (the list in
+      # console/swiss-overrides.yaml.gotmpl, llm-demo when there are no models
+      # yet), and on a fresh cluster none exists: the install failed with
+      # `namespaces "llm-demo" not found`. Same list, created if missing.
+      - events: ["presync"]
+        showlogs: true
+        command: "bash"
+        args:
+          - -ec
+          - |
+{{- $swissNs := list }}
+{{- range $m := (dig "models" (list) .Values) }}
+{{-   $swissNs = append $swissNs (dig "namespace" "llm-demo" $m) }}
+{{- end }}
+{{- range $ns := (default (list "llm-demo") $swissNs) | uniq }}
+            kubectl create namespace {{ $ns }} --dry-run=client -o yaml | kubectl apply -f -
+{{- end }}
 
   - name: console
     namespace: {{ .Values.namespaces.console }}

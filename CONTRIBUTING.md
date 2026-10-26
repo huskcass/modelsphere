@@ -19,6 +19,7 @@ Run what the change touches:
 | anything under `helmfile.yaml.gotmpl`, `environments/`, or a release's values | `helmfile -e default build` — it must render. `helmfile -e default write-values` shows what a release actually receives, which is the thing to check when a value moves |
 | a playbook or a role | `ansible-playbook --syntax-check`, and `ansible -i inventory.ini.example --list-hosts all` if you touched the inventory contract |
 | `script/*.sh` | `bash -n`, and the script's own test if it has one (`script/test_node_prep_rdma.sh` is the pattern: a fake sysfs tree, no hardware) |
+| the stack's serving path (releases `environments/kind.yaml` installs) | `make test-e2e` — kind, `helmfile -e kind apply` and the specs in [`test/e2e`](test/e2e/README.md); the `e2e` workflow runs it on every pull request |
 | documentation | check that every relative link still resolves, including `#anchors` — moving a section breaks links pointing into it, silently |
 
 A change that cannot be checked by any of these is worth saying so in the pull

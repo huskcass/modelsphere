@@ -420,6 +420,9 @@ llmGateway:
   # The Grafana datasource ConfigMap. Empty follows enabled.kubePrometheusStack;
   # a cluster with its own Grafana sets it true, one that wants none sets false.
   grafanaDatasource: ""
+  # Values passed to the openresty chart as-is, over llmgateway/openresty.yaml.gotmpl,
+  # e.g. replicas and resources on a small cluster (environments/kind.yaml).
+  # openrestyOverrides: {}
 
 # Cluster label put in front of every alert message by alert-webhook.
 # Required when enabled.alertWebhook is true; each environment sets its own.

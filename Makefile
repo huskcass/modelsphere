@@ -1,6 +1,6 @@
 .PHONY: help setup-k8s-online setup-k8s-offline setup-disk setup-mirror setup-offline-node audit-gpu gpu-prep setup-all \
         helm-deps helm-bootstrap helm-diff helm-apply helm-template helm-list helm-status \
-        offline-bundle offline-load
+        offline-bundle offline-load setup-test-e2e test-e2e cleanup-test-e2e
 
 INVENTORY ?= inventory.ini
 LIMIT ?= all
@@ -67,6 +67,10 @@ help:
 	@echo "  make offline-registry   - Start the bundle's registry               (on the isolated side)"
 	@echo "  make offline-load       - Push a bundle into REGISTRY=              (on the isolated side)"
 	@echo "                            ARGS='--source-registry 4pdosc' if the bundle has no MANIFEST"
+	@echo ""
+	@echo "End-to-end test on kind (see test/e2e/README.md):"
+	@echo "  make test-e2e           - Kind cluster, helmfile -e kind apply, run test/e2e (KEEP_CLUSTER=1 keeps it)"
+	@echo "  make cleanup-test-e2e   - Delete the kind cluster"
 	@echo ""
 	@echo "Options:"
 	@echo "  LIMIT=node1,node2       - Limit execution to specific hosts (default: all)"
@@ -246,3 +250,39 @@ offline-load:
 # REGISTRY reaches the script as a flag whose argument is missing, and the
 # site.env-only form the docs show dies on `$$2: unbound variable`.
 	script/offline_load.sh $(BUNDLE) $(if $(REGISTRY),--registry $(REGISTRY)) $(ARGS)
+
+# --- end-to-end test on kind (test/e2e/README.md)
+KIND ?= kind
+# The node is <cluster>-control-plane, which the suite passes on as
+# llmGateway.node; environments/kind.yaml defaults to this name's.
+KIND_CLUSTER ?= modelsphere-e2e
+# Empty uses the node image pinned in test/e2e/kind-config.yaml.
+KIND_NODE_IMAGE ?=
+# Empty keeps kind-config.yaml's iptables. nftables for a kernel without
+# xt_statistic, where iptables mode cannot balance a multi-endpoint Service.
+KIND_PROXY_MODE ?=
+# Extra arguments to go test, e.g. -ginkgo.focus=llmsvc.
+E2E_ARGS ?=
+E2E_TIMEOUT ?= 45m
+
+setup-test-e2e:
+	@command -v $(KIND) >/dev/null 2>&1 || { echo "kind is not installed. Install kind and retry." >&2; exit 1; }
+	@case "$$($(KIND) get clusters 2>/dev/null)" in \
+	  *"$(KIND_CLUSTER)"*) echo "Kind cluster '$(KIND_CLUSTER)' already exists. Skipping creation." ;; \
+	  *) sed 's/kubeProxyMode: iptables/kubeProxyMode: $(or $(KIND_PROXY_MODE),iptables)/' test/e2e/kind-config.yaml | \
+	     $(KIND) create cluster --name $(KIND_CLUSTER) --config - \
+	       $(if $(KIND_NODE_IMAGE),--image $(KIND_NODE_IMAGE),) --wait 120s ;; \
+	esac
+
+# Deletes the cluster on success unless KEEP_CLUSTER=1; a failure leaves it up.
+test-e2e: setup-test-e2e
+	cd test/e2e && KIND_CLUSTER=$(KIND_CLUSTER) \
+	  go test -tags=e2e . -v -ginkgo.v -timeout $(E2E_TIMEOUT) $(E2E_ARGS)
+ifeq ($(KEEP_CLUSTER),1)
+	@echo "KEEP_CLUSTER=1: leaving $(KIND_CLUSTER) up (kubectl --context kind-$(KIND_CLUSTER))"
+else
+	$(MAKE) cleanup-test-e2e
+endif
+
+cleanup-test-e2e:
+	$(KIND) delete cluster --name $(KIND_CLUSTER)
