@@ -426,8 +426,9 @@ llmGateway:
 
 # swissd. rbacScope is the swiss chart's rbac.scope: unset keeps the chart's
 # namespaced (a Role in each model namespace, listed in
-# console/swiss-overrides.yaml.gotmpl); cluster grants one ClusterRole, read
-# access to every Secret included.
+# console/swiss-overrides.yaml.gotmpl); cluster binds the release role as a
+# ClusterRole instead, so swissd can create, change and delete Secrets, Roles,
+# RoleBindings and workloads in every namespace.
 # swiss:
 #   rbacScope: cluster
 
