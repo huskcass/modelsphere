@@ -35,6 +35,7 @@ type suiteConfig struct {
 	kubectlBin    string
 	helmBin       string
 	helmfileBin   string
+	kindBin       string
 	cluster       string
 	context       string
 	skipInstall   bool
@@ -65,6 +66,7 @@ var (
 	forwards     = []*forward{swissd, console, openresty, victorialogs}
 
 	beforeSuiteOK bool
+	kubeconfigDir string
 )
 
 func TestE2E(t *testing.T) {
@@ -77,7 +79,7 @@ var _ = BeforeSuite(func() {
 	SetDefaultEventuallyPollingInterval(time.Second)
 
 	cfg = loadConfig()
-	for _, bin := range []string{cfg.kubectlBin, cfg.helmBin, cfg.helmfileBin} {
+	for _, bin := range []string{cfg.kindBin, cfg.kubectlBin, cfg.helmBin, cfg.helmfileBin} {
 		_, err := exec.LookPath(bin)
 		Expect(err).NotTo(HaveOccurred(), "%s is not installed", bin)
 	}
@@ -85,7 +87,16 @@ var _ = BeforeSuite(func() {
 	root, err = filepath.Abs("../..")
 	Expect(err).NotTo(HaveOccurred())
 
+	// helmfile's hooks run plain kubectl on the current context, so every
+	// child process gets a kubeconfig holding only the kind cluster.
 	By("using kube context " + cfg.context)
+	kubeconfigDir, err = os.MkdirTemp("", "modelsphere-e2e-")
+	Expect(err).NotTo(HaveOccurred())
+	kc, err := run(exec.Command(cfg.kindBin, "get", "kubeconfig", "--name", cfg.cluster))
+	Expect(err).NotTo(HaveOccurred(), kc)
+	kubeconfig := filepath.Join(kubeconfigDir, "kubeconfig")
+	Expect(os.WriteFile(kubeconfig, []byte(kc), 0o600)).To(Succeed())
+	Expect(os.Setenv("KUBECONFIG", kubeconfig)).To(Succeed())
 	mustKubectl("get", "nodes")
 
 	if cfg.skipInstall {
@@ -107,10 +118,14 @@ var _ = AfterSuite(func() {
 	if !beforeSuiteOK && cfg.context != "" {
 		dumpClusterState("BeforeSuite")
 	}
+	if kubeconfigDir != "" {
+		_ = os.RemoveAll(kubeconfigDir)
+	}
 })
 
 func loadConfig() suiteConfig {
 	c := suiteConfig{
+		kindBin:       envOr("KIND", "kind"),
 		kubectlBin:    envOr("KUBECTL", "kubectl"),
 		helmBin:       envOr("HELM", "helm"),
 		helmfileBin:   envOr("HELMFILE", "helmfile"),

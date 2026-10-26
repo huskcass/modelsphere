@@ -6,6 +6,7 @@ name: e2e
 # come from the internet (Docker Hub pulls are unauthenticated).
 on:
   pull_request:
+    paths-ignore: ['**.md', 'docs/**', '**.png', '**.jpg', '**.jpeg', '**.gif', '**.svg']
   workflow_dispatch:
 
 permissions:
@@ -27,15 +28,16 @@ jobs:
       HELMFILE_VERSION: 1.8.2
       # helmfile_1.8.2_checksums.txt, linux_amd64
       HELMFILE_SHA256: f179485c5bb9f8e20fbd8ea16d8807915988aba4d60131ee864fb3232452716e
+      HELM_DIFF_VERSION: v3.15.15
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v7.0.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: test/e2e/go.mod
           cache-dependency-path: test/e2e/go.sum
-      - uses: azure/setup-helm@v5.0.1
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v3.19.0
       - name: Install kind and helmfile
@@ -52,6 +54,6 @@ jobs:
           kind version
           helmfile version
       - name: Install helm-diff
-        run: make helm-deps
+        run: helm plugin install https://github.com/databus23/helm-diff --version "${HELM_DIFF_VERSION}"
       - name: e2e
         run: make test-e2e

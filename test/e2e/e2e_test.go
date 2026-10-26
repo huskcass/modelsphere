@@ -102,16 +102,21 @@ var _ = Describe("stack", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 			mustAPI(token, http.MethodPut, "/api/profile", map[string]string{"yaml": string(b)}, nil)
 
-			var info struct {
-				Name       string `json:"name"`
-				LLMService *struct {
-					Available bool `json:"available"`
-				} `json:"llmservice"`
-			}
-			mustAPI(token, http.MethodGet, "/api/cluster", nil, &info)
-			Expect(info.Name).To(Equal("kind-e2e"))
-			Expect(info.LLMService).NotTo(BeNil())
-			Expect(info.LLMService.Available).To(BeTrue(), "llm-operator's LLMService CRD is not available")
+			Eventually(func(g Gomega) {
+				var info struct {
+					Name       string   `json:"name"`
+					Warnings   []string `json:"warnings"`
+					LLMService *struct {
+						Available bool `json:"available"`
+					} `json:"llmservice"`
+				}
+				code, body := call(http.MethodGet, swissd.base()+"/api/cluster", token, "", nil, &info)
+				g.Expect(code).To(Equal(http.StatusOK), body)
+				g.Expect(info.Name).To(Equal("kind-e2e"), "warnings: %v", info.Warnings)
+				g.Expect(info.LLMService).NotTo(BeNil(), "warnings: %v", info.Warnings)
+				g.Expect(info.LLMService.Available).To(BeTrue(),
+					"llm-operator's LLMService CRD is not available; warnings: %v", info.Warnings)
+			}).WithTimeout(apiTimeout).Should(Succeed())
 		})
 
 		It("lists the mock model in the catalog", func() {
@@ -137,8 +142,8 @@ var _ = Describe("stack", Ordered, func() {
 		DescribeTable("deploys, serves and removes the mock model",
 			func(backend string) {
 				rel := "e2e-mock-" + backend
-				deployModel(token, backend, rel)
 				DeferCleanup(func() { removeModel(token, rel) })
+				deployModel(token, backend, rel)
 
 				By("chatting with the engine Service")
 				proxy := fmt.Sprintf("/api/v1/namespaces/%s/services/http:%s:8081/proxy", modelNS, rel)
@@ -227,11 +232,12 @@ func deployModel(token, backend, rel string) {
 	}).WithTimeout(readyTimeout).WithPolling(2 * time.Second).Should(Succeed())
 }
 
-// removeModel uninstalls through swissd and waits for its objects to go.
+// removeModel uninstalls through swissd and waits for its objects to go. A
+// 404 is fine: a deploy that failed early may have left nothing to remove.
 func removeModel(token, rel string) {
 	By("uninstalling " + rel)
 	code, body := call(http.MethodDelete, fmt.Sprintf("%s/api/releases/%s/%s", swissd.base(), modelNS, rel), token, "", nil, nil)
-	Expect(code).To(Equal(http.StatusOK), body)
+	Expect(code).To(BeElementOf(http.StatusOK, http.StatusNotFound), body)
 	Eventually(func(g Gomega) {
 		out, err := kubectl("-n", modelNS, "get", "deploy,svc,pods,llmservices,modelroutes,llmscalers", "-o", "name")
 		g.Expect(err).NotTo(HaveOccurred(), out)

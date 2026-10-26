@@ -267,16 +267,17 @@ E2E_TIMEOUT ?= 45m
 
 setup-test-e2e:
 	@command -v $(KIND) >/dev/null 2>&1 || { echo "kind is not installed. Install kind and retry." >&2; exit 1; }
-	@case "$$($(KIND) get clusters 2>/dev/null)" in \
-	  *"$(KIND_CLUSTER)"*) echo "Kind cluster '$(KIND_CLUSTER)' already exists. Skipping creation." ;; \
-	  *) sed 's/kubeProxyMode: iptables/kubeProxyMode: $(or $(KIND_PROXY_MODE),iptables)/' test/e2e/kind-config.yaml | \
-	     $(KIND) create cluster --name $(KIND_CLUSTER) --config - \
-	       $(if $(KIND_NODE_IMAGE),--image $(KIND_NODE_IMAGE),) --wait 120s ;; \
-	esac
+	@if $(KIND) get clusters 2>/dev/null | grep -qx '$(KIND_CLUSTER)'; then \
+	  echo "Kind cluster '$(KIND_CLUSTER)' already exists. Skipping creation."; \
+	else \
+	  sed 's/kubeProxyMode: iptables/kubeProxyMode: $(or $(KIND_PROXY_MODE),iptables)/' test/e2e/kind-config.yaml | \
+	    $(KIND) create cluster --name $(KIND_CLUSTER) --config - \
+	      $(if $(KIND_NODE_IMAGE),--image $(KIND_NODE_IMAGE),) --wait 120s; \
+	fi
 
 # Deletes the cluster on success unless KEEP_CLUSTER=1; a failure leaves it up.
 test-e2e: setup-test-e2e
-	cd test/e2e && KIND_CLUSTER=$(KIND_CLUSTER) \
+	cd test/e2e && KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) \
 	  go test -tags=e2e . -v -ginkgo.v -timeout $(E2E_TIMEOUT) $(E2E_ARGS)
 ifeq ($(KEEP_CLUSTER),1)
 	@echo "KEEP_CLUSTER=1: leaving $(KIND_CLUSTER) up (kubectl --context kind-$(KIND_CLUSTER))"
