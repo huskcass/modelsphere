@@ -424,6 +424,13 @@ llmGateway:
   # e.g. replicas and resources on a small cluster (environments/kind.yaml).
   # openrestyOverrides: {}
 
+# swissd. rbacScope is the swiss chart's rbac.scope: unset keeps the chart's
+# namespaced (a Role in each model namespace, listed in
+# console/swiss-overrides.yaml.gotmpl); cluster grants one ClusterRole, read
+# access to every Secret included.
+# swiss:
+#   rbacScope: cluster
+
 # Cluster label put in front of every alert message by alert-webhook.
 # Required when enabled.alertWebhook is true; each environment sets its own.
 name: ""

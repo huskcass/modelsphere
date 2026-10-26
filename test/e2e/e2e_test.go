@@ -195,8 +195,11 @@ func deployModel(token, backend, rel string) {
 	var planned struct {
 		Hash string `json:"hash"`
 	}
-	mustAPI(token, http.MethodPost, "/api/plans", map[string]string{
+	// Nothing creates the model namespace beforehand: swissd, installed at
+	// cluster scope, creates it on install.
+	mustAPI(token, http.MethodPost, "/api/plans", map[string]any{
 		"model": cfg.model, "release": rel, "namespace": modelNS, "serviceId": rel,
+		"createNamespace": true,
 	}, &planned)
 	Expect(planned.Hash).NotTo(BeEmpty())
 

@@ -44,3 +44,8 @@ llmGateway:
     resources:
       requests: { cpu: 200m, memory: 256Mi }
       limits: { cpu: "2", memory: 1Gi }
+
+# swissd at cluster scope, the install the e2e test mainly covers: no
+# per-namespace Role, and swissd creates the model namespace on install.
+swiss:
+  rbacScope: cluster

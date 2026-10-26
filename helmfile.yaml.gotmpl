@@ -823,25 +823,6 @@ releases:
       tier: portal
     values:
       - console/swiss-overrides.yaml.gotmpl
-    hooks:
-      # swissd's rbac puts a Role in every model namespace (the list in
-      # console/swiss-overrides.yaml.gotmpl, llm-demo when there are no models
-      # yet), and on a fresh cluster none exists: the install failed with
-      # `namespaces "llm-demo" not found`. Same list, created if missing; keep
-      # it in step with rbac.namespaces there.
-      - events: ["presync"]
-        showlogs: true
-        command: "bash"
-        args:
-          - -ec
-          - |
-{{- $swissNs := list }}
-{{- range $m := (dig "models" (list) .Values) }}
-{{-   $swissNs = append $swissNs (dig "namespace" "llm-demo" $m) }}
-{{- end }}
-{{- range $ns := (default (list "llm-demo") $swissNs) | uniq }}
-            kubectl get namespace {{ $ns }} >/dev/null 2>&1 || kubectl create namespace {{ $ns }}
-{{- end }}
 
   - name: console
     namespace: {{ .Values.namespaces.console }}

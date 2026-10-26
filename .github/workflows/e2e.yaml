@@ -5,6 +5,9 @@ name: e2e
 # openresty. Not a required check: charts, images and the model catalog all
 # come from the internet (Docker Hub pulls are unauthenticated).
 on:
+  push:
+    branches:
+      - main
   pull_request:
     paths-ignore: ['**.md', 'docs/**', '**.png', '**.jpg', '**.jpeg', '**.gif', '**.svg']
   workflow_dispatch:
@@ -17,7 +20,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  e2e:
+  e2e-mini:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -30,16 +33,16 @@ jobs:
       HELMFILE_SHA256: f179485c5bb9f8e20fbd8ea16d8807915988aba4d60131ee864fb3232452716e
       HELM_DIFF_VERSION: v3.15.15
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@v7.0.0
         with:
           go-version-file: test/e2e/go.mod
           cache-dependency-path: test/e2e/go.sum
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - uses: azure/setup-helm@v5.0.1
         with:
-          version: v3.19.0
+          version: v4.3.1
       - name: Install kind and helmfile
         run: |
           curl -fsSLo kind-linux-amd64 "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
@@ -54,6 +57,7 @@ jobs:
           kind version
           helmfile version
       - name: Install helm-diff
-        run: helm plugin install https://github.com/databus23/helm-diff --version "${HELM_DIFF_VERSION}"
+        # helm v4 refuses this plugin without --verify=false (it ships no provenance).
+        run: helm plugin install https://github.com/databus23/helm-diff --version "${HELM_DIFF_VERSION}" --verify=false
       - name: e2e
         run: make test-e2e

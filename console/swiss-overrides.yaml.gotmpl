@@ -22,6 +22,11 @@ auth:
 # models[] entry's namespace, defaulting to llm-demo the way the model
 # releases themselves do -- llm-demo when the cluster declares no models yet.
 rbac:
+{{- with dig "swiss" "rbacScope" "" .Values }}
+  # swiss.rbacScope. cluster is one ClusterRole: no per-namespace Role, so no
+  # model namespace has to exist before the install. Unset keeps namespaced.
+  scope: {{ . }}
+{{- end }}
   namespaces:
 {{- $swissNs := list }}
 {{- range $m := (dig "models" (list) .Values) }}
