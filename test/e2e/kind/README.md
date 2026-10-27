@@ -66,8 +66,16 @@ make test-e2e-kind E2E_ARGS='-ginkgo.focus=llmsvc'
 E2E_SKIP_INSTALL=1 make test-e2e-kind       # reuse an installed cluster, specs only
 make test-e2e-kind KIND_PROXY_MODE=nftables # kernel without xt_statistic
 make test-e2e-kind KIND_PROFILE=cilium      # cilium instead of kindnet and kube-proxy
+make test-e2e-kind E2E_VERBOSE=true         # print core step outputs
 make cleanup-test-e2e-kind
 ```
+
+`E2E_VERBOSE=true` (off by default, on in CI) prints the output of the core
+steps as they pass: `helm list -A` and `kubectl get pods -A` after install,
+`cilium-dbg status` in the cilium profile, each model's LLMService,
+ModelRoute (with its status) and pods, and the openresty answers (status and
+the first 400 bytes of the body). A failing spec dumps the cluster state either
+way.
 
 Images are pulled by the cluster from Docker Hub and ghcr.io, so a cold run
 spends most of its time there.

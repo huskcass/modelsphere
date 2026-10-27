@@ -73,6 +73,7 @@ var _ = Describe("stack", Ordered, func() {
 		It("replaces kube-proxy with cilium's eBPF datapath", func() {
 			out := mustKubectl("-n", "kube-system", "exec", "daemonset/cilium", "-c", "cilium-agent", "--",
 				"cilium-dbg", "status")
+			show("cilium-dbg status", out)
 			Expect(out).To(MatchRegexp(`(?m)^KubeProxyReplacement:\s+True`), out)
 		})
 	}
@@ -180,6 +181,7 @@ var _ = Describe("stack", Ordered, func() {
 				var chat chatResponse
 				code, body := call(http.MethodPost, openresty.base()+"/"+rel+"/v1/chat/completions", apiKey, "application/json",
 					jsonBody(chatRequest(cfg.model, nonce)), &chat)
+				showHTTP("POST /"+rel+"/v1/chat/completions", code, body)
 				Expect(code).To(Equal(http.StatusOK), body)
 				Expect(chat.Choices).NotTo(BeEmpty())
 				Expect(chat.Choices[0].Message.Content).NotTo(BeEmpty())
@@ -224,6 +226,7 @@ var _ = Describe("stack", Ordered, func() {
 			It("lists the model at /v1/models", func() {
 				var got modelList
 				code, body := call(http.MethodGet, route+"/v1/models", apiKey, "", nil, &got)
+				showHTTP("GET /"+rel+"/v1/models", code, body)
 				Expect(code).To(Equal(http.StatusOK), body)
 				Expect(got.ids()).To(ContainElement(cfg.model))
 			})
@@ -232,6 +235,7 @@ var _ = Describe("stack", Ordered, func() {
 				func(key string) {
 					code, body := call(http.MethodPost, route+"/v1/chat/completions", key, "application/json",
 						jsonBody(chatRequest(cfg.model, "no key")), nil)
+					showHTTP(fmt.Sprintf("POST /%s/v1/chat/completions, key %q", rel, key), code, body)
 					Expect(code).To(Equal(http.StatusUnauthorized), body)
 				},
 				Entry("missing", ""),
@@ -243,6 +247,7 @@ var _ = Describe("stack", Ordered, func() {
 					req["model"] = cfg.model
 					req["stream"] = stream
 					resp := post(route+path, req, nil)
+					showHTTP(fmt.Sprintf("POST /%s%s, stream %t (%s)", rel, path, stream, resp.ctype), resp.code, resp.body)
 					Expect(resp.code).To(Equal(http.StatusOK), resp.body)
 					if stream {
 						Expect(resp.ctype).To(HavePrefix("text/event-stream"))
@@ -267,6 +272,7 @@ var _ = Describe("stack", Ordered, func() {
 
 			It("serves concurrent requests", func() {
 				codes := burst(route+"/v1/chat/completions", 16, map[string]string{"X-Mock-TTFT-Ms": "500"})
+				show("16 concurrent requests", fmt.Sprint(codes))
 				Expect(codes).To(HaveEach(http.StatusOK))
 			})
 
@@ -283,11 +289,13 @@ var _ = Describe("stack", Ordered, func() {
 				b, err := json.Marshal(patch)
 				Expect(err).NotTo(HaveOccurred())
 				mustKubectl("-n", modelNS, "patch", "modelroute", rel, "--type=json", "-p", string(b))
+				showKubectl("modelroute "+rel+" peers", "-n", modelNS, "get", "modelroute", rel, "-o", "jsonpath={.spec.nginx.peers}")
 
 				// autoconfig re-renders the route and openresty reloads; until then
 				// the old limit of 100 lets the whole burst through.
 				Eventually(func(g Gomega) {
 					codes := burst(route+"/v1/chat/completions", 6, map[string]string{"X-Mock-TTFT-Ms": "3000"})
+					show("6 concurrent requests, maxConcurrency 1", fmt.Sprint(codes))
 					g.Expect(codes).To(ContainElement(http.StatusTooManyRequests))
 					g.Expect(codes).To(ContainElement(http.StatusOK))
 					g.Expect(codes).To(HaveEach(BeElementOf(http.StatusOK, http.StatusTooManyRequests)))

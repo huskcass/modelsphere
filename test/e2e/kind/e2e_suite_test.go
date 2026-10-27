@@ -106,6 +106,14 @@ var _ = BeforeSuite(func() {
 		installStack()
 	}
 	waitStackReady()
+	if verbose {
+		out, err := helm("list", "-A", "-a")
+		if err != nil {
+			out += "\nerror: " + err.Error()
+		}
+		show("helm releases", out)
+		showKubectl("pods", "get", "pods", "-A", "-o", "wide")
+	}
 	for _, f := range forwards {
 		startPortForward(f)
 	}

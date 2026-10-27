@@ -267,6 +267,9 @@ E2E_TIMEOUT ?= 45m
 # default: kind's own CNI and kube-proxy. cilium: no kube-proxy, cilium with
 # kubeProxyReplacement (kind-cilium-config.yaml, environments/kind-cilium.yaml).
 KIND_PROFILE ?= default
+# true: print core step outputs (helm releases, pods, cilium-dbg status, model
+# objects, openresty answers) as the specs pass. CI turns it on.
+E2E_VERBOSE ?=
 
 setup-test-e2e-kind:
 	@command -v $(KIND) >/dev/null 2>&1 || { echo "kind is not installed. Install kind and retry." >&2; exit 1; }
@@ -285,7 +288,7 @@ setup-test-e2e-kind:
 
 # Deletes the cluster on success unless KEEP_CLUSTER=1; a failure leaves it up.
 test-e2e-kind: setup-test-e2e-kind
-	cd test/e2e/kind && KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) KIND_PROFILE=$(KIND_PROFILE) \
+	cd test/e2e/kind && KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) KIND_PROFILE=$(KIND_PROFILE) E2E_VERBOSE=$(E2E_VERBOSE) \
 	  go test -tags=e2e . -v -ginkgo.v -timeout $(E2E_TIMEOUT) $(E2E_ARGS)
 ifeq ($(KEEP_CLUSTER),1)
 	@echo "KEEP_CLUSTER=1: leaving $(KIND_CLUSTER) up (kubectl --context kind-$(KIND_CLUSTER))"

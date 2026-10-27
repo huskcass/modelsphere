@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +24,38 @@ import (
 // apiKey is openresty's API key in the kind environment
 // (llmGateway.openrestyOverrides.secret in environments/kind.yaml).
 const apiKey = "sk-e2e-kind"
+
+// verbose is E2E_VERBOSE: print core step outputs (helm releases, pods,
+// cilium-dbg status, model objects, openresty answers) as the specs pass.
+// Off by default; failures dump the cluster state either way.
+var verbose = os.Getenv("E2E_VERBOSE") == "1" || os.Getenv("E2E_VERBOSE") == "true"
+
+// show prints a step's output when verbose. With -ginkgo.v (the Makefile
+// default) GinkgoWriter is streamed to stdout as it is written.
+func show(title, out string) {
+	if verbose {
+		_, _ = fmt.Fprintf(GinkgoWriter, "\n--- %s\n%s\n", title, strings.TrimRight(out, "\n"))
+	}
+}
+
+// showHTTP prints an HTTP answer's status and the start of its body.
+func showHTTP(title string, code int, body string) {
+	if len(body) > 400 {
+		body = body[:400] + "..."
+	}
+	show(fmt.Sprintf("%s -> %d", title, code), body)
+}
+
+// showKubectl prints a kubectl command's output when verbose.
+func showKubectl(title string, args ...string) {
+	if verbose {
+		out, err := kubectl(args...)
+		if err != nil {
+			out += "\nerror: " + err.Error()
+		}
+		show(title, out)
+	}
+}
 
 // deployModel plans and installs the mock model with swissd, then waits for
 // its pod and its ModelRoute.
@@ -69,6 +102,8 @@ func deployModel(token, backend, rel string) {
 		g.Expect(err).NotTo(HaveOccurred(), out)
 		g.Expect(out).To(Equal("True"))
 	}).WithTimeout(readyTimeout).WithPolling(2 * time.Second).Should(Succeed())
+	showKubectl("["+backend+"] "+rel+" objects", "-n", modelNS, "get", "llmservices,modelroutes,deploy,pods", "-o", "wide")
+	showKubectl("["+backend+"] modelroute "+rel+" status", "-n", modelNS, "get", "modelroute", rel, "-o", "jsonpath={.status}")
 }
 
 // removeModel uninstalls through swissd and waits for its objects to go. A

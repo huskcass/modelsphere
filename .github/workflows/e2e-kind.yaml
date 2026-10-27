@@ -69,4 +69,5 @@ jobs:
       - name: e2e
         env:
           KIND_PROFILE: ${{ matrix.profile }}
+          E2E_VERBOSE: "true"
         run: make test-e2e-kind
