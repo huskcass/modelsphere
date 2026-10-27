@@ -421,6 +421,15 @@ llmGateway:
   # a cluster with its own Grafana sets it true, one that wants none sets false.
   grafanaDatasource: ""
 
+# swissd's RBAC, the swiss chart's rbac.scope.
+#   cluster     one ClusterRole. Simpler: any namespace works and none has to
+#               exist first. Not so safe: swissd can write Secrets, Roles,
+#               RoleBindings and model workloads in every namespace.
+#   namespaced  a Role in each model namespace (rbac.namespaces, listed in
+#               console/swiss-overrides.yaml.gotmpl). The tighter opt-in.
+swiss:
+  rbacScope: cluster
+
 # Cluster label put in front of every alert message by alert-webhook.
 # Required when enabled.alertWebhook is true; each environment sets its own.
 name: ""

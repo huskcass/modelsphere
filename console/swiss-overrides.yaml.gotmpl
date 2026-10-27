@@ -18,10 +18,12 @@ persistence:
 auth:
   proxyKey: true
 
-# The namespaces holding model releases, so swissd can see them: every
+# scope follows swiss.rbacScope (environments/default.yaml), cluster by default.
+# namespaces is what namespaced scope grants, ignored at cluster scope: every
 # models[] entry's namespace, defaulting to llm-demo the way the model
 # releases themselves do -- llm-demo when the cluster declares no models yet.
 rbac:
+  scope: {{ dig "swiss" "rbacScope" "cluster" .Values }}
   namespaces:
 {{- $swissNs := list }}
 {{- range $m := (dig "models" (list) .Values) }}
