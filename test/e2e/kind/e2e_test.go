@@ -3,12 +3,8 @@
 package e2e
 
 import (
-	"bytes"
-	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -83,11 +79,9 @@ var _ = Describe("stack", Ordered, func() {
 
 	It("logs in to console with the default admin", func() {
 		form := url.Values{
-			"grant_type":    {"password"},
-			"username":      {"admin"},
-			"password":      {"P@88w0rd"},
-			"client_id":     {"kubesphere"},
-			"client_secret": {"kubesphere"},
+			"grant_type": {"password"},
+			"username":   {"admin"},
+			"password":   {"P@88w0rd"},
 		}
 		var tok struct {
 			AccessToken string `json:"access_token"`
@@ -179,12 +173,12 @@ var _ = Describe("stack", Ordered, func() {
 				nonce := fmt.Sprintf("e2e%s%d", strings.ReplaceAll(backend, "-", ""), time.Now().UnixNano())
 				Eventually(func(g Gomega) {
 					var got modelList
-					code, body := call(http.MethodGet, openresty.base()+"/"+rel+"/v1/models", "", "", nil, &got)
+					code, body := call(http.MethodGet, openresty.base()+"/"+rel+"/v1/models", apiKey, "", nil, &got)
 					g.Expect(code).To(Equal(http.StatusOK), body)
 					g.Expect(got.ids()).To(ContainElement(cfg.model))
 				}).WithTimeout(readyTimeout).WithPolling(2 * time.Second).Should(Succeed())
 				var chat chatResponse
-				code, body := call(http.MethodPost, openresty.base()+"/"+rel+"/v1/chat/completions", "", "application/json",
+				code, body := call(http.MethodPost, openresty.base()+"/"+rel+"/v1/chat/completions", apiKey, "application/json",
 					jsonBody(chatRequest(cfg.model, nonce)), &chat)
 				Expect(code).To(Equal(http.StatusOK), body)
 				Expect(chat.Choices).NotTo(BeEmpty())
@@ -195,7 +189,7 @@ var _ = Describe("stack", Ordered, func() {
 				// (minutes, on a quiet cluster), so a single request can sit unshipped.
 				By("finding the request in victorialogs")
 				Eventually(func(g Gomega) {
-					code, body := call(http.MethodPost, openresty.base()+"/"+rel+"/v1/chat/completions", "", "application/json",
+					code, body := call(http.MethodPost, openresty.base()+"/"+rel+"/v1/chat/completions", apiKey, "application/json",
 						jsonBody(chatRequest(cfg.model, nonce)), nil)
 					g.Expect(code).To(Equal(http.StatusOK), body)
 					q := url.Values{"query": {"req_body:" + nonce}, "limit": {"5"}}
@@ -209,151 +203,96 @@ var _ = Describe("stack", Ordered, func() {
 			Entry(nil, "helm"),
 			Entry(nil, "llmsvc"),
 		)
+
+		// One more mock release, for what openresty does in front of it: the
+		// three inference APIs streamed and not, API keys, concurrency and the
+		// ModelRoute's per-peer limit.
+		Describe("openresty in front of the mock model", Ordered, func() {
+			const rel = "e2e-mock-api"
+			var route string
+
+			BeforeAll(func() {
+				DeferCleanup(func() { removeModel(token, rel) })
+				deployModel(token, "helm", rel)
+				route = openresty.base() + "/" + rel
+				Eventually(func(g Gomega) {
+					code, body := call(http.MethodGet, route+"/v1/models", apiKey, "", nil, nil)
+					g.Expect(code).To(Equal(http.StatusOK), body)
+				}).WithTimeout(readyTimeout).WithPolling(2 * time.Second).Should(Succeed())
+			})
+
+			It("lists the model at /v1/models", func() {
+				var got modelList
+				code, body := call(http.MethodGet, route+"/v1/models", apiKey, "", nil, &got)
+				Expect(code).To(Equal(http.StatusOK), body)
+				Expect(got.ids()).To(ContainElement(cfg.model))
+			})
+
+			DescribeTable("refuses a request without a valid API key",
+				func(key string) {
+					code, body := call(http.MethodPost, route+"/v1/chat/completions", key, "application/json",
+						jsonBody(chatRequest(cfg.model, "no key")), nil)
+					Expect(code).To(Equal(http.StatusUnauthorized), body)
+				},
+				Entry("missing", ""),
+				Entry("wrong", "sk-wrong"),
+			)
+
+			DescribeTable("answers",
+				func(path string, stream bool, req map[string]any, want string) {
+					req["model"] = cfg.model
+					req["stream"] = stream
+					resp := post(route+path, req, nil)
+					Expect(resp.code).To(Equal(http.StatusOK), resp.body)
+					if stream {
+						Expect(resp.ctype).To(HavePrefix("text/event-stream"))
+					} else {
+						Expect(resp.ctype).To(HavePrefix("application/json"))
+					}
+					Expect(resp.body).To(ContainSubstring(want))
+				},
+				Entry("/v1/chat/completions", "/v1/chat/completions", false,
+					chatRequest("", "hi"), `"object":"chat.completion"`),
+				Entry("/v1/chat/completions, streamed", "/v1/chat/completions", true,
+					chatRequest("", "hi"), "data: [DONE]"),
+				Entry("/v1/completions", "/v1/completions", false,
+					map[string]any{"prompt": "hi"}, `"object":"text_completion"`),
+				Entry("/v1/completions, streamed", "/v1/completions", true,
+					map[string]any{"prompt": "hi"}, "data: [DONE]"),
+				Entry("/v1/messages", "/v1/messages", false,
+					messagesRequest("hi"), `"type":"message"`),
+				Entry("/v1/messages, streamed", "/v1/messages", true,
+					messagesRequest("hi"), "event: message_stop"),
+			)
+
+			It("serves concurrent requests", func() {
+				codes := burst(route+"/v1/chat/completions", 16, map[string]string{"X-Mock-TTFT-Ms": "500"})
+				Expect(codes).To(HaveEach(http.StatusOK))
+			})
+
+			// Last: it leaves the route limited until AfterAll removes it.
+			It("answers 429 past the ModelRoute's maxConcurrency", func() {
+				By("limiting every peer group of ModelRoute " + rel + " to 1 request in flight")
+				out := mustKubectl("-n", modelNS, "get", "modelroute", rel, "-o", "jsonpath={.spec.nginx.peers[*].use}")
+				var patch []map[string]any
+				for i := range strings.Fields(out) {
+					patch = append(patch, map[string]any{
+						"op": "add", "path": fmt.Sprintf("/spec/nginx/peers/%d/maxConcurrency", i), "value": 1,
+					})
+				}
+				b, err := json.Marshal(patch)
+				Expect(err).NotTo(HaveOccurred())
+				mustKubectl("-n", modelNS, "patch", "modelroute", rel, "--type=json", "-p", string(b))
+
+				// autoconfig re-renders the route and openresty reloads; until then
+				// the old limit of 100 lets the whole burst through.
+				Eventually(func(g Gomega) {
+					codes := burst(route+"/v1/chat/completions", 6, map[string]string{"X-Mock-TTFT-Ms": "3000"})
+					g.Expect(codes).To(ContainElement(http.StatusTooManyRequests))
+					g.Expect(codes).To(ContainElement(http.StatusOK))
+					g.Expect(codes).To(HaveEach(BeElementOf(http.StatusOK, http.StatusTooManyRequests)))
+				}).WithTimeout(2 * time.Minute).WithPolling(time.Second).Should(Succeed())
+			})
+		})
 	})
 })
-
-// deployModel plans and installs the mock model with swissd, then waits for
-// its pod and its ModelRoute.
-func deployModel(token, backend, rel string) {
-	By(fmt.Sprintf("[%s] planning %s as %s/%s", backend, cfg.model, modelNS, rel))
-	var planned struct {
-		Hash string `json:"hash"`
-	}
-	// Nothing creates the model namespace beforehand: swissd, installed at
-	// cluster scope, creates it on install.
-	mustAPI(token, http.MethodPost, "/api/plans", map[string]any{
-		"model": cfg.model, "release": rel, "namespace": modelNS, "serviceId": rel,
-		"createNamespace": true,
-	}, &planned)
-	Expect(planned.Hash).NotTo(BeEmpty())
-
-	By("[" + backend + "] installing")
-	var installed struct {
-		Status      string `json:"status"`
-		StatusError string `json:"statusError"`
-	}
-	mustAPI(token, http.MethodPost, "/api/install", map[string]string{
-		"planHash": planned.Hash, "applyWith": backend,
-	}, &installed)
-	Expect(installed.Status).To(Equal("applied"), installed.StatusError)
-
-	By("[" + backend + "] waiting for the release to be ready")
-	Eventually(func(g Gomega) {
-		var st struct {
-			Ready int    `json:"ready"`
-			Total int    `json:"total"`
-			Route string `json:"route"`
-		}
-		code, body := call(http.MethodGet, fmt.Sprintf("%s/api/releases/%s/%s/status", swissd.base(), modelNS, rel), token, "", nil, &st)
-		g.Expect(code).To(Equal(http.StatusOK), body)
-		g.Expect(st.Total).To(BeNumerically(">", 0))
-		g.Expect(st.Ready).To(Equal(st.Total))
-		g.Expect(st.Route).To(Equal(rel))
-	}).WithTimeout(readyTimeout).WithPolling(5 * time.Second).Should(Succeed())
-
-	Eventually(func(g Gomega) {
-		out, err := kubectl("-n", modelNS, "get", "modelroute", rel,
-			"-o", `jsonpath={.status.conditions[?(@.type=="Ready")].status}`)
-		g.Expect(err).NotTo(HaveOccurred(), out)
-		g.Expect(out).To(Equal("True"))
-	}).WithTimeout(readyTimeout).WithPolling(2 * time.Second).Should(Succeed())
-}
-
-// removeModel uninstalls through swissd and waits for its objects to go. A
-// 404 is fine: a deploy that failed early may have left nothing to remove.
-func removeModel(token, rel string) {
-	By("uninstalling " + rel)
-	code, body := call(http.MethodDelete, fmt.Sprintf("%s/api/releases/%s/%s", swissd.base(), modelNS, rel), token, "", nil, nil)
-	Expect(code).To(BeElementOf(http.StatusOK, http.StatusNotFound), body)
-	Eventually(func(g Gomega) {
-		out, err := kubectl("-n", modelNS, "get", "deploy,svc,pods,llmservices,modelroutes,llmscalers", "-o", "name")
-		g.Expect(err).NotTo(HaveOccurred(), out)
-		for _, obj := range nonEmptyLines(out) {
-			name := obj[strings.LastIndex(obj, "/")+1:]
-			g.Expect(name == rel || strings.HasPrefix(name, rel+"-")).To(BeFalse(), "%s is still there", obj)
-		}
-	}).WithTimeout(goneTimeout).WithPolling(3 * time.Second).Should(Succeed())
-}
-
-func secretValue(ns, name, key string) string {
-	out := mustKubectl("-n", ns, "get", "secret", name, "-o", "jsonpath={.data."+key+"}")
-	b, err := base64.StdEncoding.DecodeString(out)
-	Expect(err).NotTo(HaveOccurred())
-	Expect(b).NotTo(BeEmpty(), "secret %s/%s has no %s", ns, name, key)
-	return string(b)
-}
-
-// mustAPI calls swissd and expects 200.
-func mustAPI(token, method, path string, in, out any) {
-	var body io.Reader
-	ctype := ""
-	if in != nil {
-		body, ctype = jsonBody(in), "application/json"
-	}
-	code, text := call(method, swissd.base()+path, token, ctype, body, out)
-	ExpectWithOffset(1, code).To(Equal(http.StatusOK), "%s %s: %s", method, path, text)
-}
-
-// httpClient opens a connection per request. kubectl port-forward drops idle
-// ones, and Go does not retry a DELETE that hits the closed socket (seen: EOF
-// on the uninstall after a minute without a swissd call).
-var httpClient = &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
-
-// call does one HTTP request and decodes a 2xx JSON body into out when given.
-func call(method, target, token, ctype string, body io.Reader, out any) (int, string) {
-	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, method, target, body)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred())
-	if ctype != "" {
-		req.Header.Set("Content-Type", ctype)
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return 0, err.Error()
-	}
-	defer resp.Body.Close()
-	b, _ := io.ReadAll(resp.Body)
-	if out != nil && resp.StatusCode/100 == 2 {
-		ExpectWithOffset(1, json.Unmarshal(b, out)).To(Succeed(), string(b))
-	}
-	return resp.StatusCode, string(b)
-}
-
-func jsonBody(v any) io.Reader {
-	b, err := json.Marshal(v)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred())
-	return bytes.NewReader(b)
-}
-
-type modelList struct {
-	Data []struct {
-		ID string `json:"id"`
-	} `json:"data"`
-}
-
-func (m modelList) ids() []string {
-	var ids []string
-	for _, d := range m.Data {
-		ids = append(ids, d.ID)
-	}
-	return ids
-}
-
-func chatRequest(model, content string) map[string]any {
-	return map[string]any{
-		"model":    model,
-		"messages": []map[string]string{{"role": "user", "content": content}},
-	}
-}
-
-type chatResponse struct {
-	Choices []struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
-	} `json:"choices"`
-}

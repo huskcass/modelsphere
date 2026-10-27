@@ -41,6 +41,11 @@ llmGateway:
   # more than 6 CPUs.
   openrestyOverrides:
     replicas: 1
+    # Turns openresty's API-key check on with a test-only key, so test/e2e/kind
+    # can check that a wrong or missing key is refused.
+    secret:
+      create: true
+      keys: "sk-e2e-kind:e2e"
     resources:
       requests: { cpu: 200m, memory: 256Mi }
       limits: { cpu: "2", memory: 1Gi }

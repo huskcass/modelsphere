@@ -33,15 +33,15 @@ device); GitHub's runners have it.
 
 ## Covered
 
-17 specs in `default`, 20 in `cilium`. Every release the environment installs
+28 specs in `default`, 31 in `cilium`. Every release the environment installs
 must be `deployed` and its workloads ready; beyond that:
 
 | Component | Status | Notes |
 |---|---|---|
 | swissd | tested | `/healthz`, `/readyz`, login, site profile, `mock-llm` in the catalog; plans, installs and uninstalls the model with both backends (`helm`, `llmsvc`) at cluster scope, creating `llm-demo` |
 | console | tested | OAuth password login as the default admin |
-| openresty | tested | `/v1/models` and a chat at `/<release>/v1/...` for each backend; one small replica |
-| autoconfig | tested | the model's ModelRoute turns Ready and openresty serves its route |
+| openresty | tested | on a third mock release: `/v1/models`; `/v1/chat/completions`, `/v1/completions` and `/v1/messages`, each streamed and not; 401 for a missing or wrong API key (the kind env sets a test key, `sk-e2e-kind`); 16 concurrent requests; 429 once the ModelRoute's peers are patched to `maxConcurrency: 1`. Also a chat for each backend. One small replica |
+| autoconfig | tested | the model's ModelRoute turns Ready and openresty serves its route; a ModelRoute change reaches openresty (the 429 spec) |
 | bodylog, bodylog-victorialogs | tested | the chat request (by nonce and model) is found in victorialogs |
 | llmscaleoperator | tested | its LLMService CRD is available to swissd; the `llmsvc` backend deploys through it |
 | bodylog-exporter | installed only | ServiceMonitor off |
