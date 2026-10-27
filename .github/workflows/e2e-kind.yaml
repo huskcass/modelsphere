@@ -1,6 +1,6 @@
-name: e2e
+name: e2e-kind
 
-# test/e2e on a kind cluster: the stack installed with `helmfile -e kind apply`,
+# test/e2e/kind on a kind cluster: the stack installed with `helmfile -e kind apply`,
 # then a mock model deployed through swissd and called directly and through
 # openresty. Not a required check: charts, images and the model catalog all
 # come from the internet (Docker Hub pulls are unauthenticated).
@@ -16,11 +16,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: e2e-${{ github.ref }}
+  group: e2e-kind-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  e2e-mini:
+  e2e-kind:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -38,8 +38,8 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@v7.0.0
         with:
-          go-version-file: test/e2e/go.mod
-          cache-dependency-path: test/e2e/go.sum
+          go-version-file: test/e2e/kind/go.mod
+          cache-dependency-path: test/e2e/kind/go.sum
       - uses: azure/setup-helm@v5.0.1
         with:
           version: v4.3.1
@@ -60,4 +60,4 @@ jobs:
         # helm v4 refuses this plugin without --verify=false (it ships no provenance).
         run: helm plugin install https://github.com/databus23/helm-diff --version "${HELM_DIFF_VERSION}" --verify=false
       - name: e2e
-        run: make test-e2e
+        run: make test-e2e-kind

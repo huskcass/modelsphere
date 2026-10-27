@@ -1,4 +1,4 @@
-# A single-node, CPU-only kind cluster: what test/e2e installs (make test-e2e).
+# A single-node, CPU-only kind cluster: what test/e2e/kind installs (make test-e2e-kind).
 # Layered over default.yaml. Everything that needs GPUs, NICs, disks for ceph or
 # a Prometheus operator is off; what is left is the serving path -- openresty,
 # autoconfig, bodylog, llm-operator, llm-slo, swissd and console -- sized to fit
@@ -30,7 +30,7 @@ storage:
   persistence: false
 
 llmGateway:
-  # kind names its node <cluster>-control-plane; test/e2e sets this from
+  # kind names its node <cluster>-control-plane; test/e2e/kind sets this from
   # KIND_CLUSTER, so the value here only matters for a hand-run apply.
   node: modelsphere-e2e-control-plane
   hostPath: /var/lib/bodylog

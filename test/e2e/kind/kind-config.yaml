@@ -1,4 +1,4 @@
-# Kind cluster for test/e2e: one CPU-only control-plane node.
+# Kind cluster for test/e2e/kind: one CPU-only control-plane node.
 # kubeProxyMode iptables is kind's default and what GitHub's runners need.
 # On a kernel without xt_statistic, where iptables mode cannot balance a
 # Service over more than one endpoint, run with KIND_PROXY_MODE=nftables.

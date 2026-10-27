@@ -98,7 +98,7 @@ var _ = Describe("stack", Ordered, func() {
 		})
 
 		It("saves the kind site profile", func() {
-			b, err := os.ReadFile(filepath.Join(root, "test/e2e/testdata/profile.yaml"))
+			b, err := os.ReadFile(filepath.Join(root, "test/e2e/kind/testdata/profile.yaml"))
 			Expect(err).NotTo(HaveOccurred())
 			mustAPI(token, http.MethodPut, "/api/profile", map[string]string{"yaml": string(b)}, nil)
 

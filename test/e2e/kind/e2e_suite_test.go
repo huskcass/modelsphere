@@ -84,7 +84,7 @@ var _ = BeforeSuite(func() {
 		Expect(err).NotTo(HaveOccurred(), "%s is not installed", bin)
 	}
 	var err error
-	root, err = filepath.Abs("../..")
+	root, err = filepath.Abs("../../..")
 	Expect(err).NotTo(HaveOccurred())
 
 	// helmfile's hooks run plain kubectl on the current context, so every

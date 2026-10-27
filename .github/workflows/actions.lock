@@ -3,7 +3,7 @@
 # Docs: https://gh.io/actions-lockfile
 version: 'v0.0.3'
 workflows:
-    '.github/workflows/e2e.yaml':
+    '.github/workflows/e2e-kind.yaml':
         - 'actions/checkout@v7.0.1'
         - 'actions/setup-go@v7.0.0'
         - 'azure/setup-helm@v5.0.1'

@@ -1,4 +1,4 @@
-module github.com/modelsphere/modelsphere/test/e2e
+module github.com/modelsphere/modelsphere/test/e2e/kind
 
 go 1.26.0
 

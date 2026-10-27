@@ -1,6 +1,6 @@
-# test/e2e
+# test/e2e/kind
 
-End-to-end test of the stack on a CPU-only kind cluster. `make test-e2e`:
+End-to-end test of the stack on a CPU-only kind cluster. `make test-e2e-kind`:
 
 1. creates kind cluster `modelsphere-e2e` from `kind-config.yaml` (skipped if it exists);
 2. installs the stack with `helmfile -e kind apply` (`environments/kind.yaml`);
@@ -32,12 +32,12 @@ scaler decisions (need GPU nodes), CART, and the helmfile `models:` path.
 Needs docker, kind, kubectl, helm with helm-diff (`make helm-deps`), helmfile and Go.
 
 ```sh
-make test-e2e                          # create, install, test, delete
-make test-e2e KEEP_CLUSTER=1           # keep the cluster afterwards
-make test-e2e E2E_ARGS='-ginkgo.focus=llmsvc'
-E2E_SKIP_INSTALL=1 make test-e2e       # reuse an installed cluster, specs only
-make test-e2e KIND_PROXY_MODE=nftables # kernel without xt_statistic
-make cleanup-test-e2e
+make test-e2e-kind                          # create, install, test, delete
+make test-e2e-kind KEEP_CLUSTER=1           # keep the cluster afterwards
+make test-e2e-kind E2E_ARGS='-ginkgo.focus=llmsvc'
+E2E_SKIP_INSTALL=1 make test-e2e-kind       # reuse an installed cluster, specs only
+make test-e2e-kind KIND_PROXY_MODE=nftables # kernel without xt_statistic
+make cleanup-test-e2e-kind
 ```
 
 Images are pulled by the cluster from Docker Hub and ghcr.io, so a cold run
