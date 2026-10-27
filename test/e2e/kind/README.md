@@ -16,16 +16,27 @@ the model namespace (`llm-demo`) on the first install.
 
 ## Covered
 
-- all nine releases deployed and their workloads ready;
-- swissd: `/healthz`, `/readyz`, login, the site profile (`testdata/profile.yaml`),
-  `mock-llm` in the public catalog;
-- console: OAuth login as the default admin;
-- for each swissd backend (`helm`, `llmsvc`): deploy `mock-llm` (no GPU, no weights),
-  `/v1/models` on its Service, a chat through openresty on the route autoconfig
-  publishes, the request recorded by bodylog in victorialogs, then uninstall.
+17 specs. Every release the `kind` environment installs must be `deployed`
+and its workloads ready; beyond that:
 
-Not covered: kube-prometheus-stack and ServiceMonitors (off in the profile),
-scaler decisions (need GPU nodes), CART, and the helmfile `models:` path.
+| Component | Status | Notes |
+|---|---|---|
+| swissd | tested | `/healthz`, `/readyz`, login, site profile, `mock-llm` in the catalog; plans, installs and uninstalls the model with both backends (`helm`, `llmsvc`) at cluster scope, creating `llm-demo` |
+| console | tested | OAuth password login as the default admin |
+| openresty | tested | `/v1/models` and a chat at `/<release>/v1/...` for each backend; one small replica |
+| autoconfig | tested | the model's ModelRoute turns Ready and openresty serves its route |
+| bodylog, bodylog-victorialogs | tested | the chat request (by nonce and model) is found in victorialogs |
+| llmscaleoperator | tested | its LLMService CRD is available to swissd; the `llmsvc` backend deploys through it |
+| bodylog-exporter | installed only | ServiceMonitor off |
+| llm-slo | installed only | no scaling decision is checked |
+| kube-prometheus-stack, alerts, dashboards, alert-webhook | off | no ServiceMonitors |
+| rook-ceph, rook-ceph-cluster, ceph-csi-drivers | off | kind's `standard` local-path storage, no persistence |
+| gpu-operator, dcgm metrics, network-operator, NicClusterPolicy, ascend-device-plugin | off | CPU-only node |
+| cilium | off | kind's own CNI |
+| lws, volcano, descheduler, node-problem-detector, condition2taint, llm-canary-operator | off | |
+
+Not covered either: real GPUs and real engines (the model is `mock-llm`, no
+weights), autoscaling, CART, and the helmfile `models:` path.
 
 ## Run
 
