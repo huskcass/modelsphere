@@ -14,10 +14,27 @@ stack then requests about 2.5 CPU / 3 GiB and fits a 4 vCPU / 16 GB GitHub runne
 swissd is installed at cluster scope (the default `swiss.rbacScope: cluster`), and it creates
 the model namespace (`llm-demo`) on the first install.
 
+## Profiles
+
+`KIND_PROFILE` picks how the cluster is networked; the stack and the specs are
+the same. The `e2e-kind` workflow runs both.
+
+| Profile | Kind config | Helmfile environment | Networking |
+|---|---|---|---|
+| `default` | `kind-config.yaml` | `kind` | kind's own CNI (kindnet) and kube-proxy (iptables, or `KIND_PROXY_MODE`) |
+| `cilium` | `kind-cilium-config.yaml` | `kind-cilium` | no default CNI and `kubeProxyMode: none`; the helmfile's cilium release with `kubeProxyReplacement: true`, so Services go through cilium's eBPF datapath |
+
+In the `cilium` profile the node stays NotReady until cilium is up. The cilium
+release is the one release helmfile waits for, so the rest of the stack still
+installs in a single `helmfile -e kind-cilium apply`. Without kube-proxy the
+agent reaches the apiserver at `<cluster>-control-plane:6443`, which the suite
+sets from `KIND_CLUSTER`. Cilium needs the `vxlan` kernel module (its tunnel
+device); GitHub's runners have it.
+
 ## Covered
 
-17 specs. Every release the `kind` environment installs must be `deployed`
-and its workloads ready; beyond that:
+17 specs in `default`, 20 in `cilium`. Every release the environment installs
+must be `deployed` and its workloads ready; beyond that:
 
 | Component | Status | Notes |
 |---|---|---|
@@ -32,7 +49,7 @@ and its workloads ready; beyond that:
 | kube-prometheus-stack, alerts, dashboards, alert-webhook | off | no ServiceMonitors |
 | rook-ceph, rook-ceph-cluster, ceph-csi-drivers | off | kind's `standard` local-path storage, no persistence |
 | gpu-operator, dcgm metrics, network-operator, NicClusterPolicy, ascend-device-plugin | off | CPU-only node |
-| cilium | off | kind's own CNI |
+| cilium | tested (`cilium` profile) / off (`default`) | release deployed, agent DaemonSet rolled out, no kube-proxy DaemonSet, `cilium-dbg status` reports `KubeProxyReplacement: True`; in-cluster Service traffic (e.g. swissd and the operators reaching the apiserver's ClusterIP, every DNS lookup through the kube-dns Service) goes through it. Hubble relay is installed; Hubble and network policy are not checked |
 | lws, volcano, descheduler, node-problem-detector, condition2taint, llm-canary-operator | off | |
 
 Not covered either: real GPUs and real engines (the model is `mock-llm`, no
@@ -48,6 +65,7 @@ make test-e2e-kind KEEP_CLUSTER=1           # keep the cluster afterwards
 make test-e2e-kind E2E_ARGS='-ginkgo.focus=llmsvc'
 E2E_SKIP_INSTALL=1 make test-e2e-kind       # reuse an installed cluster, specs only
 make test-e2e-kind KIND_PROXY_MODE=nftables # kernel without xt_statistic
+make test-e2e-kind KIND_PROFILE=cilium      # cilium instead of kindnet and kube-proxy
 make cleanup-test-e2e-kind
 ```
 
