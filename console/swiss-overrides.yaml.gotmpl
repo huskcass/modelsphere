@@ -18,12 +18,21 @@ persistence:
 auth:
   proxyKey: true
 
-# scope follows swiss.rbacScope (environments/default.yaml), cluster by default.
-# namespaces is what namespaced scope grants, ignored at cluster scope: every
-# models[] entry's namespace, defaulting to llm-demo the way the model
-# releases themselves do -- llm-demo when the cluster declares no models yet.
+# scope follows swiss.rbacScope (environments/default.yaml): cluster by default,
+# anything but cluster or namespaced fails. namespaces only at namespaced scope,
+# the namespaces holding model releases: every models[] entry's namespace,
+# defaulting to llm-demo the way the model releases themselves do -- llm-demo
+# when the cluster declares no models yet.
+{{- $scope := dig "swiss" "rbacScope" nil .Values }}
+{{- if kindIs "invalid" $scope }}
+{{-   $scope = "cluster" }}
+{{- end }}
+{{- if not (has $scope (list "cluster" "namespaced")) }}
+{{-   fail (printf "swiss.rbacScope is %q: it must be cluster or namespaced" (toString $scope)) }}
+{{- end }}
 rbac:
-  scope: {{ dig "swiss" "rbacScope" "cluster" .Values }}
+  scope: {{ $scope }}
+{{- if eq $scope "namespaced" }}
   namespaces:
 {{- $swissNs := list }}
 {{- range $m := (dig "models" (list) .Values) }}
@@ -34,4 +43,5 @@ rbac:
 {{- end }}
 {{- range $ns := $swissNs | uniq }}
       - {{ $ns | quote }}
+{{- end }}
 {{- end }}

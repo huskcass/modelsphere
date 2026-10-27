@@ -423,8 +423,9 @@ llmGateway:
 
 # swissd's RBAC, the swiss chart's rbac.scope.
 #   cluster     one ClusterRole. Simpler: any namespace works and none has to
-#               exist first. Not so safe: swissd can write Secrets, Roles,
-#               RoleBindings and model workloads in every namespace.
+#               exist first. Not safe: swissd can read every Secret in the
+#               cluster and create Deployments and RoleBindings in any
+#               namespace, kube-system included -- close to cluster-admin.
 #   namespaced  a Role in each model namespace (rbac.namespaces, listed in
 #               console/swiss-overrides.yaml.gotmpl). The tighter opt-in.
 swiss:
