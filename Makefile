@@ -264,20 +264,28 @@ KIND_PROXY_MODE ?=
 # Extra arguments to go test, e.g. -ginkgo.focus=llmsvc.
 E2E_ARGS ?=
 E2E_TIMEOUT ?= 45m
+# default: kind's own CNI and kube-proxy. cilium: no kube-proxy, cilium with
+# kubeProxyReplacement (kind-cilium-config.yaml, environments/kind-cilium.yaml).
+KIND_PROFILE ?= default
 
 setup-test-e2e-kind:
 	@command -v $(KIND) >/dev/null 2>&1 || { echo "kind is not installed. Install kind and retry." >&2; exit 1; }
 	@if $(KIND) get clusters 2>/dev/null | grep -qx '$(KIND_CLUSTER)'; then \
 	  echo "Kind cluster '$(KIND_CLUSTER)' already exists. Skipping creation."; \
-	else \
+	elif [ '$(KIND_PROFILE)' = cilium ]; then \
+	  $(KIND) create cluster --name $(KIND_CLUSTER) --config test/e2e/kind/kind-cilium-config.yaml \
+	    $(if $(KIND_NODE_IMAGE),--image $(KIND_NODE_IMAGE),); \
+	elif [ '$(KIND_PROFILE)' = default ]; then \
 	  sed 's/kubeProxyMode: iptables/kubeProxyMode: $(or $(KIND_PROXY_MODE),iptables)/' test/e2e/kind/kind-config.yaml | \
 	    $(KIND) create cluster --name $(KIND_CLUSTER) --config - \
 	      $(if $(KIND_NODE_IMAGE),--image $(KIND_NODE_IMAGE),) --wait 120s; \
+	else \
+	  echo "KIND_PROFILE must be default or cilium, not '$(KIND_PROFILE)'" >&2; exit 2; \
 	fi
 
 # Deletes the cluster on success unless KEEP_CLUSTER=1; a failure leaves it up.
 test-e2e-kind: setup-test-e2e-kind
-	cd test/e2e/kind && KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) \
+	cd test/e2e/kind && KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) KIND_PROFILE=$(KIND_PROFILE) \
 	  go test -tags=e2e . -v -ginkgo.v -timeout $(E2E_TIMEOUT) $(E2E_ARGS)
 ifeq ($(KEEP_CLUSTER),1)
 	@echo "KEEP_CLUSTER=1: leaving $(KIND_CLUSTER) up (kubectl --context kind-$(KIND_CLUSTER))"

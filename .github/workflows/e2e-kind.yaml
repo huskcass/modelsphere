@@ -2,8 +2,10 @@ name: e2e-kind
 
 # test/e2e/kind on a kind cluster: the stack installed with `helmfile -e kind apply`,
 # then a mock model deployed through swissd and called directly and through
-# openresty. Not a required check: charts, images and the model catalog all
-# come from the internet (Docker Hub pulls are unauthenticated).
+# openresty. Once per profile: `default` (kind's CNI and kube-proxy) and
+# `cilium` (no kube-proxy; cilium's eBPF kube-proxy replacement). Not a
+# required check: charts, images and the model catalog all come from the
+# internet (Docker Hub pulls are unauthenticated).
 on:
   push:
     branches:
@@ -21,7 +23,12 @@ concurrency:
 
 jobs:
   e2e-kind:
+    name: e2e-kind (${{ matrix.profile }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [default, cilium]
     timeout-minutes: 60
     env:
       KIND_VERSION: v0.33.0
@@ -60,4 +67,6 @@ jobs:
         # helm v4 refuses this plugin without --verify=false (it ships no provenance).
         run: helm plugin install https://github.com/databus23/helm-diff --version "${HELM_DIFF_VERSION}" --verify=false
       - name: e2e
+        env:
+          KIND_PROFILE: ${{ matrix.profile }}
         run: make test-e2e-kind

@@ -57,6 +57,30 @@ var _ = Describe("stack", Ordered, func() {
 		Entry(nil, consoleNS, "console"),
 	)
 
+	// Only in the cilium profile: the Services every other spec goes through
+	// are served by cilium's eBPF kube-proxy replacement, not kube-proxy.
+	if kindProfile() == "cilium" {
+		It("has the cilium release deployed", func() {
+			out, err := helm("status", "cilium", "-n", "kube-system", "-o", "json")
+			Expect(err).NotTo(HaveOccurred(), out)
+			Expect(out).To(ContainSubstring(`"status":"deployed"`))
+		})
+
+		It("runs without kube-proxy", func() {
+			out, err := kubectl("-n", "kube-system", "get", "daemonset", "-o", "name")
+			Expect(err).NotTo(HaveOccurred(), out)
+			Expect(nonEmptyLines(out)).To(ContainElement("daemonset.apps/cilium"))
+			Expect(nonEmptyLines(out)).NotTo(ContainElement("daemonset.apps/kube-proxy"))
+			mustKubectl("-n", "kube-system", "rollout", "status", "daemonset/cilium", "--timeout=2m")
+		})
+
+		It("replaces kube-proxy with cilium's eBPF datapath", func() {
+			out := mustKubectl("-n", "kube-system", "exec", "daemonset/cilium", "-c", "cilium-agent", "--",
+				"cilium-dbg", "status")
+			Expect(out).To(MatchRegexp(`(?m)^KubeProxyReplacement:\s+True`), out)
+		})
+	}
+
 	It("logs in to console with the default admin", func() {
 		form := url.Values{
 			"grant_type":    {"password"},

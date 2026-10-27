@@ -38,6 +38,7 @@ type suiteConfig struct {
 	kindBin       string
 	cluster       string
 	context       string
+	profile       string // default or cilium, see kindProfile
 	skipInstall   bool
 	model         string
 	readyTimeout  time.Duration
@@ -135,21 +136,39 @@ func loadConfig() suiteConfig {
 		installTimout: time.Duration(envInt("INSTALL_TIMEOUT", 900)) * time.Second,
 	}
 	c.context = "kind-" + c.cluster
+	c.profile = kindProfile()
 	c.skipInstall = os.Getenv("E2E_SKIP_INSTALL") == "1" || os.Getenv("E2E_SKIP_INSTALL") == "true"
 	return c
 }
 
-// installStack applies the repo's helmfile, environment kind. The node name
-// follows KIND_CLUSTER, since bodylog is pinned to that node.
+// kindProfile is KIND_PROFILE: "default" (kind's CNI and kube-proxy) or
+// "cilium" (no kube-proxy; cilium with kubeProxyReplacement). It is read at
+// package init too, since it decides which specs exist.
+func kindProfile() string {
+	p := envOr("KIND_PROFILE", "default")
+	if p != "default" && p != "cilium" {
+		panic(fmt.Sprintf("KIND_PROFILE must be default or cilium, not %q", p))
+	}
+	return p
+}
+
+// installStack applies the repo's helmfile, environment kind (kind-cilium for
+// the cilium profile). The node name follows KIND_CLUSTER, since bodylog is
+// pinned to that node; without kube-proxy cilium reaches the apiserver at it too.
 func installStack() {
-	By("installing the stack: helmfile -e kind apply")
+	env := "kind"
+	node := cfg.cluster + "-control-plane"
+	sets := []string{"--state-values-set", "llmGateway.node=" + node}
+	if cfg.profile == "cilium" {
+		env = "kind-cilium"
+		sets = append(sets, "--state-values-set", "cilium.k8sServiceHost="+node)
+	}
+	By("installing the stack: helmfile -e " + env + " apply")
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.installTimout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, cfg.helmfileBin,
-		"-f", "helmfile.yaml.gotmpl", "-e", "kind",
-		"--kube-context", cfg.context,
-		"--state-values-set", "llmGateway.node="+cfg.cluster+"-control-plane",
-		"apply", "--skip-diff-on-install", "--suppress-diff")
+	args := append([]string{"-f", "helmfile.yaml.gotmpl", "-e", env, "--kube-context", cfg.context}, sets...)
+	args = append(args, "apply", "--skip-diff-on-install", "--suppress-diff")
+	cmd := exec.CommandContext(ctx, cfg.helmfileBin, args...)
 	cmd.Dir = root
 	out, err := run(cmd)
 	Expect(err).NotTo(HaveOccurred(), tail(out, 80))
