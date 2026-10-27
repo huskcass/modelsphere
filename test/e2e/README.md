@@ -11,7 +11,7 @@ End-to-end test of the stack on a CPU-only kind cluster. `make test-e2e`:
 The `kind` environment turns off everything that needs GPUs, NICs, ceph disks or
 the Prometheus operator, and shrinks openresty to one small replica. The whole
 stack then requests about 2.5 CPU / 3 GiB and fits a 4 vCPU / 16 GB GitHub runner.
-swissd is installed at cluster scope (`swiss.rbacScope: cluster`), and it creates
+swissd is installed at cluster scope (the default `swiss.rbacScope: cluster`), and it creates
 the model namespace (`llm-demo`) on the first install.
 
 ## Covered

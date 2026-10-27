@@ -424,13 +424,15 @@ llmGateway:
   # e.g. replicas and resources on a small cluster (environments/kind.yaml).
   # openrestyOverrides: {}
 
-# swissd. rbacScope is the swiss chart's rbac.scope: unset keeps the chart's
-# namespaced (a Role in each model namespace, listed in
-# console/swiss-overrides.yaml.gotmpl); cluster binds the release role as a
-# ClusterRole instead, so swissd can create, change and delete Secrets, Roles,
-# RoleBindings and workloads in every namespace.
-# swiss:
-#   rbacScope: cluster
+# swissd's RBAC, the swiss chart's rbac.scope.
+#   cluster     one ClusterRole. Simpler: any namespace works and none has to
+#               exist first. Not safe: swissd can read every Secret in the
+#               cluster and create Deployments and RoleBindings in any
+#               namespace, kube-system included -- close to cluster-admin.
+#   namespaced  a Role in each model namespace (rbac.namespaces, listed in
+#               console/swiss-overrides.yaml.gotmpl). The tighter opt-in.
+swiss:
+  rbacScope: cluster
 
 # Cluster label put in front of every alert message by alert-webhook.
 # Required when enabled.alertWebhook is true; each environment sets its own.
